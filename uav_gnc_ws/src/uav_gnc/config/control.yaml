@@ -1,7 +1,6 @@
 control_node:
   ros__parameters:
     dt: 0.01
-
     mass: 2.0
     Ix: 0.02
     Iy: 0.02
@@ -10,5 +9,8 @@ control_node:
     use_drag: true
     k1: 0.15
     k2: 0.02
-
     odom_topic: "/nav/odom" # 노이즈 없는 상태를 보려면(guidacne only) /sim/odom으로 
+    # ===== 제어기 추종 성능을 높이기 위해 새로 추가하는 값들 ===== 
+    kp_pos_xy: 1.5
+    kp_vel_xy: 2.5
+    max_tilt_deg: 25.0

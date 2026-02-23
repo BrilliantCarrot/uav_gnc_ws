@@ -10,18 +10,18 @@ guidance_node:
 
     # 모드 설정 파라미터 ("lookahead" or "min_jerk" or "min_snap" or "multi_snap")
     guidance_mode: "multi_snap" 
-
+    # 기본 사각형 궤적 웨이포인트
     # waypoints_x: [0.0, 5.0, 5.0, 0.0, 0.0]
     # waypoints_y: [0.0, 0.0, 5.0, 5.0, 0.0]
-    # 뾰족한 모서리를 잘라내고 진입/진출점을 명시하여 '둥근 사각형' 유도
+    # 뾰족한 모서리를 잘라내고 진입/진출점을 명시하여 '둥근 사각형' 유도(칠각형)
     waypoints_x: [0.0, 4.0, 5.0, 5.0, 4.0, 1.0, 0.0, 0.0]
     waypoints_y: [0.0, 0.0, 1.0, 4.0, 5.0, 5.0, 4.0, 0.0]
 
     # 6주차 (Look-ahead) 용 파라미터
-    accept_radius: 0.5          
+    accept_radius: 2.0          
     lookahead_dist: 1.5         
 
     # 7주차 (Polynomial) 용 파라미터
-    avg_speed: 1.5              
+    avg_speed: 1.5 # 코너 진입 속도, 조정하여 직선 경로에 더 가깝에 붙어서 비행, 너무 느려도 빨라도 안됨
     
     hold_last: true

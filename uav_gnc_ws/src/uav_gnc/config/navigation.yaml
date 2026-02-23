@@ -1,4 +1,5 @@
 navigation_node:
   ros__parameters:
-    in_topic: "/sim/odom"
+    imu_topic: "/sim/imu"
+    gps_topic: "/sim/gps/pos"
     out_topic: "/nav/odom"
