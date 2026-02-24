@@ -32,8 +32,14 @@ Deriv derivatives(const State& s, const Input& u, const Params& p) {
         const Vec3 Fd = (-p.k1)*s.v + (-p.k2)*vnorm*s.v; // 저속 선형 항력과 중·고속의 제곱 항력 모사, world frame서 계산
         a_drag = Fd / p.mass;
     }
-    // 최종적인 선형 가속도, 뉴턴 제2법칙의 가속도 형태(뉴턴 병진 운동)
-    d.dv = (thrust_world / p.mass) + gravity + a_drag;
+    
+    // 최종적인 선형 가속도, 뉴턴 제2법칙의 가속도 형태(뉴턴 병진 운동), 외란 없음
+    // d.dv = (thrust_world / p.mass) + gravity + a_drag;
+
+    // 강건함 테스트: 바람에 의한 가속도 (F = ma -> a = F/m)
+    Vec3 a_wind = p.wind_force / p.mass; 
+    // 최종적인 선형 가속도에 바람 가속도 추가
+    d.dv = (thrust_world / p.mass) + gravity + a_drag + a_wind;
 
     // 자세 미분
     // Quaternion derivative: q_dot = 0.5 * q ⊗ omega_quat

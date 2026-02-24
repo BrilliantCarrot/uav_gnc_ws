@@ -99,6 +99,7 @@ struct Params { // 기체 물성치
     bool use_drag{true}; // 항력 모델
     double k1{0.15};
     double k2{0.02};
+    Vec3 wind_force{0.0, 0.0, 0.0}; // 추가, World Frame 기준 바람(외란) 힘 (N)
 };
 struct Input { // 제어 입력
     Vec3 thrust_body;  // N (body 좌표계 기준 힘 추력 벡터)

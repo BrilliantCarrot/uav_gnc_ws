@@ -9,3 +9,8 @@ simulation_node:
     use_drag: true
     k1: 0.15
     k2: 0.02
+    # ===== 강인함(robustness) 테스트용 악조건 테스트 파라미터 =====
+    # GPS 노이즈 줄이면 ekf.cpp의 R_gps 행렬값도 줄여줘야됨(10 정도로)
+    noise_gps: 1.5   # 기존 0.5 -> 1.5로 노이즈 3배 증가(저가형 GPS 썼다 가정)
+    wind_x: 2.0      # X 방향으로 지속적으로 미는 바람 (N)
+    wind_y: -1.0     # Y 방향으로 지속적으로 미는 바람 (N)

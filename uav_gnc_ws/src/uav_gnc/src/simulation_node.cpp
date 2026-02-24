@@ -35,6 +35,11 @@ public:
     params_.k1 = this->declare_parameter<double>("k1", 0.15);
     params_.k2 = this->declare_parameter<double>("k2", 0.02);
 
+    // robustness 테스트용 바람 외란 파라미터 불러오기
+    params_.wind_force.x = this->declare_parameter<double>("wind_x", 0.0);
+    params_.wind_force.y = this->declare_parameter<double>("wind_y", 0.0);
+    params_.wind_force.z = 0.0; // 먼저 측풍(Crosswind)만 고려
+
     // 노이즈 표준편차 파라미터 (기본값 설정)
     double n_acc = this->declare_parameter<double>("noise_acc", 0.1); // 가속도계 노이즈 표준편차 (m/s^2)
     double n_gyr = this->declare_parameter<double>("noise_gyr", 0.01); // 자이로 노이즈 표준편차 (rad/s)
