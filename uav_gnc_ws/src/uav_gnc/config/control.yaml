@@ -11,6 +11,11 @@ control_node:
     k2: 0.02
     odom_topic: "/nav/odom" # 노이즈 없는 상태를 보려면(guidacne only) /sim/odom으로 
     # ===== 제어기 추종 성능을 높이기 위해 새로 추가하는 값들 ===== 
-    kp_pos_xy: 1.5
-    kp_vel_xy: 2.5
+    kp_pos_xy: 1.0 # 1.5
+    kp_vel_xy: 2.0 # 2.5
     max_tilt_deg: 25.0
+    # 적분 제어 게인 파라미터(끄고 싶으면 값 I 게인 0으로)
+    ki_vel_xy: 1.0 # 0.5 1.0
+    ki_vel_z: 1.0 # 0.5 1.0
+    max_int_vxy: 3.0 # 5.0
+    max_int_vz: 3.0 # 5.0

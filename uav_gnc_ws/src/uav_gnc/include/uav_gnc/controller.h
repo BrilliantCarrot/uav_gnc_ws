@@ -17,6 +17,11 @@ struct ControllerGains {
     double kd_att_rp  = 1.5;
     double kp_att_yaw = 4.0;
     double kd_att_yaw = 0.8;
+    // I 제어기 게인 및 안티 와인드업 제한값
+    double ki_vel_xy = 0.5;
+    double ki_vel_z  = 0.5;
+    double max_int_vxy = 2.0; // 적분기 포화 방지용 최대값
+    double max_int_vz  = 2.0;
     // 최대 기울기 각도 제한 (degree)
     double max_tilt_deg = 20.0;
     // ===== Actuator Saturation(구동기 포화) 방지와 Trajectory Safety(궤적 안전)를 위해 설계된 Hard Constraint =====
@@ -58,8 +63,9 @@ struct ControllerOutput {
 // Quaternion -> Euler(ZYX) helper를 main에서도 쓰게 헤더에 선언(main에서 오일러 계산해 로깅/검증하도록 링크 가능하게)
 void quat_to_euler_zyx(const Quat& q, double& roll, double& pitch, double& yaw);
 
-// 현재 상태 s를 보고, 목표 ref를 따라가도록 입력 u를 계산.
-Input controller_update(const State& s, const Ref& ref, const Params& params, const ControllerGains& gains);
+// 현재 상태 s를 보고, 목표 ref를 따라가도록 입력 u를 계산
+// week 강인함 테스트용 dt와 누적 에러 저장용 변수 추가
+Input controller_update(const State& s, const Ref& ref, const Params& params, const ControllerGains& gains, double dt, Vec3& int_e_v);
 
-// Debug 포함 함수
+// Debug 포함 함수(I 없음)
 ControllerOutput controller_update_dbg(const State& s, const Ref& ref, const Params& params, const ControllerGains& gains);

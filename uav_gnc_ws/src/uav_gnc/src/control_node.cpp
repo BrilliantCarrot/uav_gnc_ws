@@ -38,6 +38,12 @@ public:
     gains_.kp_vel_xy = this->declare_parameter<double>("kp_vel_xy", gains_.kp_vel_xy);
     gains_.kp_vel_z  = this->declare_parameter<double>("kp_vel_z",  gains_.kp_vel_z);
 
+    // I 제어, I 게인과 안티 와인드업 파라미터 선언 추가
+    gains_.ki_vel_xy = this->declare_parameter<double>("ki_vel_xy", gains_.ki_vel_xy);
+    gains_.ki_vel_z  = this->declare_parameter<double>("ki_vel_z",  gains_.ki_vel_z);
+    gains_.max_int_vxy = this->declare_parameter<double>("max_int_vxy", gains_.max_int_vxy);
+    gains_.max_int_vz  = this->declare_parameter<double>("max_int_vz",  gains_.max_int_vz);
+
     gains_.kp_att_rp  = this->declare_parameter<double>("kp_att_rp",  gains_.kp_att_rp);
     gains_.kd_att_rp  = this->declare_parameter<double>("kd_att_rp",  gains_.kd_att_rp);
     gains_.kp_att_yaw = this->declare_parameter<double>("kp_att_yaw", gains_.kp_att_yaw);
@@ -149,7 +155,7 @@ private:
 
     // 제어 계산 결과를 ROS 메시지로 바꿔서 시뮬레이터로 보냄
     // u: 힘/모멘트, s: 현재상태, ref: 목표상태, params_: 기체물성치, gains_: 제어이득
-    const Input u = controller_update(s, ref, params_, gains_);
+    const Input u = controller_update(s, ref, params_, gains_, dt_, int_e_v_);
     // 힘+토크의 Wrench
     geometry_msgs::msg::WrenchStamped wrench;
     wrench.header.stamp = this->now();
@@ -179,6 +185,7 @@ private:
 
   std::mutex mtx_;
   std::string odom_topic_; // odom 구독 토픽 이름
+  Vec3 int_e_v_{0.0, 0.0, 0.0}; // 속도 제어 누적 오차 저장용 변수
 
   rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr wrench_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;

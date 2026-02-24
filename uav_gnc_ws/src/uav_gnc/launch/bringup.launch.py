@@ -96,10 +96,10 @@ def generate_launch_description():
             'csv_path': 'nav_tracking_eval.csv',
             'rate_hz': 20.0,
             # guidance.yaml에서 웨이포인트를 바꾸면, 여기서도 수정 필요
-            'waypoints_x': [0.0, 5.0, 5.0, 0.0, 0.0],
-            'waypoints_y': [0.0, 0.0, 5.0, 5.0, 0.0],
-            # 'waypoints_x': [0.0, 4.0, 5.0, 5.0, 4.0, 1.0, 0.0, 0.0],
-            # 'waypoints_y': [0.0, 0.0, 1.0, 4.0, 5.0, 5.0, 4.0, 0.0],
+            # 'waypoints_x': [0.0, 5.0, 5.0, 0.0, 0.0],
+            # 'waypoints_y': [0.0, 0.0, 5.0, 5.0, 0.0],
+            'waypoints_x': [0.0, 4.0, 5.0, 5.0, 4.0, 1.0, 0.0, 0.0],
+            'waypoints_y': [0.0, 0.0, 1.0, 4.0, 5.0, 5.0, 4.0, 0.0],
             'accept_radius': 2.0,
             'auto_exit_on_complete': True,
             'settle_time_sec': 1.0,   # 완주 후 1초만 더 기록하고 종료 (원하면 0으로)
