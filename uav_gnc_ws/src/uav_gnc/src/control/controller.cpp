@@ -140,22 +140,24 @@ Input controller_update(const State& s, const Ref& ref, const Params& params, co
     // =====================
     const Vec3 e_p = ref.p_ref - s.p;
     // Vec3 v_cmd;
-    const double vx_cmd = gains.kp_pos_xy * e_p.x;
-    const double vy_cmd = gains.kp_pos_xy * e_p.y;
+    const double vx_cmd = gains.kp_pos_xy * e_p.x + ref.v_ref.x;
+    const double vy_cmd = gains.kp_pos_xy * e_p.y + ref.v_ref.y;
+    double vz_cmd = gains.kp_pos_z  * e_p.z + ref.v_ref.z;
+    // const double vx_cmd = gains.kp_pos_xy * e_p.x;
+    // const double vy_cmd = gains.kp_pos_xy * e_p.y;
+    // double vz_cmd = gains.kp_pos_z  * e_p.z;
     // 수평과 수직 dynamics가 다르고, 튜닝도 다르므로 z축은 별도 게인 사용.
-    double vz_cmd = gains.kp_pos_z  * e_p.z;
     vz_cmd = clamp(vz_cmd, -gains.max_vz_cmd, gains.max_vz_cmd); // 오버슈트 감소용
     // =====================
-    // 3) Velocity -> Acceleration (P 제어, 중간 루프)
+    // 3) Velocity -> Acceleration (P 제어 + 가속도 피드포워드)
     // 원하는 속도를 만들기 위한 가속도 명령 생성.
     // 실제 속도 s.v가 명령보다 느리면 +가속도, 빠르면 -가속도.
     // 결과 가속도 명령은 월드 좌표계 기준으로 필요한 가속도.
     // =====================
-    const double ax_cmd = gains.kp_vel_xy * (vx_cmd - s.v.x);
-    const double ay_cmd = gains.kp_vel_xy * (vy_cmd - s.v.y);
-
-    double az_cmd = gains.kp_vel_z  * (vz_cmd - s.v.z);
-    az_cmd = clamp(az_cmd, -gains.max_az_cmd, gains.max_az_cmd); // 오버슈트 감소용
+    const double ax_cmd = gains.kp_vel_xy * (vx_cmd - s.v.x) + ref.a_ref.x;
+    const double ay_cmd = gains.kp_vel_xy * (vy_cmd - s.v.y) + ref.a_ref.y;
+    double az_cmd = gains.kp_vel_z  * (vz_cmd - s.v.z) + ref.a_ref.z;
+    az_cmd = clamp(az_cmd, -gains.max_az_cmd, gains.max_az_cmd);  // 오버슈트 감소용
 
     // =====================
     // 4) 가속도 명령을 기울기로 변환(tilt mapping, 쿼드콥터 드론의 기동을 고려, a_cmd_xy -> roll_ref, pitch_ref)

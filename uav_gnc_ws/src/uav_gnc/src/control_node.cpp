@@ -64,7 +64,7 @@ public:
       odom_topic_, 10, std::bind(&ControlNode::odomCallback, this, std::placeholders::_1));
     // odom_topic_에서 오도메트리 데이터를 수신하여 odomCallback 함수로 처리하는 구독자 생성
 
-    sp_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+    sp_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
       "/guidance/setpoint", 10,
       std::bind(&ControlNode::setpointCallback, this, std::placeholders::_1));
 
@@ -100,16 +100,31 @@ private:
     has_state_ = true;
   }
 
-  void setpointCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
+  void setpointCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
   {
     std::lock_guard<std::mutex> lock(mtx_);
 
-    ref_.p_ref = { msg->pose.position.x,
-                   msg->pose.position.y,
-                   msg->pose.position.z };
+    // ref_.p_ref = { msg->pose.position.x,
+    //                msg->pose.position.y,
+    //                msg->pose.position.z };
+
+    // Odometry는 pose.pose.position 형태로 한 번 더 들어가야 함
+    ref_.p_ref = { msg->pose.pose.position.x,
+                   msg->pose.pose.position.y,
+                   msg->pose.pose.position.z };
+
+    // 가이던스가 보낸 목표 속도(Feedforward) 저장
+    ref_.v_ref = { msg->twist.twist.linear.x,
+                   msg->twist.twist.linear.y,
+                   msg->twist.twist.linear.z };
+
+    // 가속도 피드포워드: 각속도 공간에 숨겨둔 가속도 피드포워드 꺼내기
+    ref_.a_ref = { msg->twist.twist.angular.x,
+                   msg->twist.twist.angular.y,
+                   msg->twist.twist.angular.z };
 
     // quaternion -> yaw
-    const auto &q = msg->pose.orientation;
+    const auto &q = msg->pose.pose.orientation;
     ref_.yaw_ref = std::atan2(2.0 * (q.w * q.z + q.x * q.y),
                               1.0 - 2.0 * (q.y * q.y + q.z * q.z));
 
@@ -167,7 +182,7 @@ private:
 
   rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr wrench_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr sp_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sp_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

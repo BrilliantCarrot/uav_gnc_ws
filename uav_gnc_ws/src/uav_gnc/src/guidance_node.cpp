@@ -56,7 +56,7 @@ public:
       odom_topic, 10, std::bind(&GuidanceNode::odomCallback, this, std::placeholders::_1));
       
     // 제어기에게 목표 위치(Setpoint)를 명령하는 Publisher
-    setpoint_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(setpoint_topic_, 10);
+    setpoint_pub_ = this->create_publisher<nav_msgs::msg::Odometry>(setpoint_topic_, 10);
 
     // rate_hz_(예: 20Hz = 0.05초)마다 onTimer 함수를 실행시키는 타이머
     const auto period = std::chrono::duration<double>(1.0 / std::max(1.0, rate_hz_));
@@ -156,17 +156,18 @@ private:
     total_multi_T_ = multi_snap_x_.getTotalTime(); // 총 비행시간 기록
   }
 
-  // ---------------------------------------------------
+// ---------------------------------------------------
   // 6. 메인 타이머 루프 (제어기에게 계속 Setpoint 쏘기)
   // 20Hz(0.05초)마다 실행되면서 드론을 이끌어 줌
   // ---------------------------------------------------
   void onTimer() {
     if (!have_odom_) return; // 내 위치를 모르면 명령을 내릴 수 없음
 
-    geometry_msgs::msg::PoseStamped sp;
+    // [수정] PoseStamped 대신 Odometry 메시지 사용 (위치 + 속도 동시 전달)
+    nav_msgs::msg::Odometry sp;
     sp.header.stamp = this->now();
     sp.header.frame_id = last_frame_id_.empty() ? "world" : last_frame_id_;
-    sp.pose.position.z = z_ref_; // 고도는 파라미터로 고정 (추후 3D 최적화로 확장 가능)
+    sp.pose.pose.position.z = z_ref_; // 고도는 파라미터로 고정 (추후 3D 최적화로 확장 가능)
 
     // ==========================================
     // 모드 1: 6주차 (Look-ahead 모드)
@@ -189,8 +190,15 @@ private:
       double spx = (dist < 1e-6) ? wp_x_[wp_index_] : current_x_ + (dx / dist) * std::min(lookahead_dist_, dist);
       double spy = (dist < 1e-6) ? wp_y_[wp_index_] : current_y_ + (dy / dist) * std::min(lookahead_dist_, dist);
 
-      sp.pose.position.x = spx; sp.pose.position.y = spy;
-      sp.pose.orientation = yawToQuat(std::atan2(spy - current_y_, spx - current_x_)); // 진행 방향 바라보기
+      // [수정] pose.position -> pose.pose.position
+      sp.pose.pose.position.x = spx; 
+      sp.pose.pose.position.y = spy;
+      sp.pose.pose.orientation = yawToQuat(std::atan2(spy - current_y_, spx - current_x_)); // 진행 방향 바라보기
+
+      // [추가] 방향 벡터를 기반으로 평균 속도(avg_speed_)만큼 피드포워드 속도 인가
+      sp.twist.twist.linear.x = (dist < 1e-6) ? 0.0 : (dx / dist) * avg_speed_;
+      sp.twist.twist.linear.y = (dist < 1e-6) ? 0.0 : (dy / dist) * avg_speed_;
+      sp.twist.twist.linear.z = 0.0;
     } 
     
     // ==========================================
@@ -210,11 +218,18 @@ private:
           vx = snap_x_.getVelocity(t); vy = snap_y_.getVelocity(t);
         }
         
-        sp.pose.position.x = spx; sp.pose.position.y = spy;
+        // [수정] pose.position -> pose.pose.position
+        sp.pose.pose.position.x = spx; 
+        sp.pose.pose.position.y = spy;
         
         // 속도 벡터를 이용해 기체가 가야 할 방향(Yaw) 부드럽게 계산
         current_yaw_ = (std::hypot(vx, vy) > 0.05) ? std::atan2(vy, vx) : current_yaw_;
-        sp.pose.orientation = yawToQuat(current_yaw_);
+        sp.pose.pose.orientation = yawToQuat(current_yaw_);
+
+        // [추가] 다항식에서 계산된 정답 속도를 피드포워드로 바로 넘김
+        sp.twist.twist.linear.x = vx;
+        sp.twist.twist.linear.y = vy;
+        sp.twist.twist.linear.z = 0.0;
 
         // 이 구간의 할당 시간(T)이 다 끝났다면?
         if (t >= current_segment_T_) {
@@ -225,36 +240,70 @@ private:
       } else {
         // 비행 종료 후 제자리 유지
         if (!hold_last_) return;
-        sp.pose.position.x = wp_x_.back(); sp.pose.position.y = wp_y_.back();
-        sp.pose.orientation = yawToQuat(current_yaw_);
+        sp.pose.pose.position.x = wp_x_.back(); 
+        sp.pose.pose.position.y = wp_y_.back();
+        sp.pose.pose.orientation = yawToQuat(current_yaw_);
+
+        // [추가] 멈춘 상태이므로 속도 0
+        sp.twist.twist.linear.x = 0.0;
+        sp.twist.twist.linear.y = 0.0;
+        sp.twist.twist.linear.z = 0.0;
       }
     }
     
     // ==========================================
     // 모드 3: 다중 구간 (Multi-segment Minimum Snap)
-    // 중간에 멈추는 로직 없이 전체 시간(total_multi_T_) 동안 물 흐르듯 진행(이름 그대로 다중 구간 고려)
+    // 중간에 멈추는 로직 없이 전체 시간(total_multi_T_) 동안 물 흐르듯 진행
     // ==========================================
     else if (guidance_mode_ == "multi_snap") {
       if (is_trajectory_active_) {
         double t = (this->now() - segment_start_time_).seconds();
         
-        sp.pose.position.x = multi_snap_x_.getPosition(t);
-        sp.pose.position.y = multi_snap_y_.getPosition(t);
+        // pose.position -> pose.pose.position
+        sp.pose.pose.position.x = multi_snap_x_.getPosition(t);
+        sp.pose.pose.position.y = multi_snap_y_.getPosition(t);
 
         double vx = multi_snap_x_.getVelocity(t);
         double vy = multi_snap_y_.getVelocity(t);
+
+        // 0.001초 뒤의 속도를 구해 수치미분으로 정확한 목표 가속도 획득
+        double vx_next = multi_snap_x_.getVelocity(t + 0.001);
+        double vy_next = multi_snap_y_.getVelocity(t + 0.001);
+        double ax = (vx_next - vx) / 0.001;
+        double ay = (vy_next - vy) / 0.001;
         
         current_yaw_ = (std::hypot(vx, vy) > 0.05) ? std::atan2(vy, vx) : current_yaw_;
-        sp.pose.orientation = yawToQuat(current_yaw_);
+        sp.pose.pose.orientation = yawToQuat(current_yaw_);
+
+        // 다항식에서 계산된 정답 속도를 피드포워드로 바로 넘김
+        sp.twist.twist.linear.x = vx;
+        sp.twist.twist.linear.y = vy;
+        sp.twist.twist.linear.z = 0.0;
+
+        // Odometry 빈 공간(angular)에 목표 가속도 몰래 담아 보내기
+        sp.twist.twist.angular.x = ax;
+        sp.twist.twist.angular.y = ay;
+        sp.twist.twist.angular.z = 0.0;
 
         if (t >= total_multi_T_) is_trajectory_active_ = false; // 총 비행시간이 끝나면 종료
       } else {
         if (!hold_last_) return;
-        sp.pose.position.x = wp_x_.back(); sp.pose.position.y = wp_y_.back();
-        sp.pose.orientation = yawToQuat(current_yaw_);
+        sp.pose.pose.position.x = wp_x_.back(); 
+        sp.pose.pose.position.y = wp_y_.back();
+        sp.pose.pose.orientation = yawToQuat(current_yaw_);
+
+        // 멈춘 상태이므로 속도 0
+        sp.twist.twist.linear.x = 0.0;
+        sp.twist.twist.linear.y = 0.0;
+        sp.twist.twist.linear.z = 0.0;
+
+        // 멈춘 상태이므로 가속도 0
+        sp.twist.twist.angular.x = 0.0;
+        sp.twist.twist.angular.y = 0.0;
+        sp.twist.twist.angular.z = 0.0;
       }
     }
-    // 최종적으로 계산된 "가야 할 곳(Setpoint)"을 발행하여 제어기(ControlNode)로 전달
+    // 최종적으로 계산된 "가야 할 곳(Setpoint) 및 목표 속도"를 발행하여 제어기(ControlNode)로 전달
     setpoint_pub_->publish(sp);
   }
 
@@ -276,7 +325,7 @@ private:
   double current_segment_T_{0.0}, total_multi_T_{0.0};
   bool is_trajectory_active_{false};
 
-  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr setpoint_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr setpoint_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
 };

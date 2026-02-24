@@ -33,6 +33,8 @@ struct ControllerGains {
 struct Ref {
     // 목표 위치(월드)와 목표 yaw
     Vec3 p_ref;
+    Vec3 v_ref;
+    Vec3 a_ref;
     double yaw_ref = 0.0;
 };
 
