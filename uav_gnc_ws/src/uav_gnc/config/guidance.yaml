@@ -6,22 +6,21 @@ guidance_node:
     sim_odom_topic: "/sim/odom"
 
     rate_hz: 20.0
-    z_ref: 1.0
+    # z_ref: 1.0 # 3D 웨이포인트를 쓰므로 이제 고정 고도는 안 씀 (주석 처리 또는 삭제해도 무방)
 
     # 모드 설정 파라미터 ("lookahead" or "min_jerk" or "min_snap" or "multi_snap")
     guidance_mode: "multi_snap" 
-    # 기본 사각형 궤적 웨이포인트
-    # waypoints_x: [0.0, 5.0, 5.0, 0.0, 0.0]
-    # waypoints_y: [0.0, 0.0, 5.0, 5.0, 0.0]
-    # 뾰족한 모서리를 잘라내고 진입/진출점을 명시하여 '둥근 사각형' 유도(칠각형)
+    
+    # 뾰족한 모서리를 잘라내고 진입/진출점을 명시하여 '둥근 사각형' 유도 (칠각형) + 3D 고도 추가
     waypoints_x: [0.0, 4.0, 5.0, 5.0, 4.0, 1.0, 0.0, 0.0]
     waypoints_y: [0.0, 0.0, 1.0, 4.0, 5.0, 5.0, 4.0, 0.0]
+    waypoints_z: [0.0, 0.5, 1.0, 2.0, 2.0, 1.5, 1.0, 0.0] # z축 웨이포인트 추가함
 
     # 6주차 (Look-ahead) 용 파라미터
     accept_radius: 2.0          
     lookahead_dist: 1.5         
 
     # 7주차 (Polynomial) 용 파라미터
-    avg_speed: 1.5 # 코너 진입 속도, 조정하여 직선 경로에 더 가깝에 붙어서 비행, 너무 느려도 빨라도 안됨
+    avg_speed: 1.1 # 코너 진입 속도
     
     hold_last: true

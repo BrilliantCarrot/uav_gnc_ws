@@ -76,16 +76,14 @@ def generate_launch_description():
         'input_odom_topic': '/sim/odom',
         'csv_path': 'sim_tracking_eval.csv',
         'rate_hz': 20.0,
-        # guidance.yaml에서 웨이포인트를 바꾸면, 여기서도 수정 필요
-        # 사각형
-        # 'waypoints_x': [0.0, 5.0, 5.0, 0.0, 0.0],
-        # 'waypoints_y': [0.0, 0.0, 5.0, 5.0, 0.0],
-        # 칠각형
+        # 3D 웨이포인트로 변경함
         'waypoints_x': [0.0, 4.0, 5.0, 5.0, 4.0, 1.0, 0.0, 0.0],
         'waypoints_y': [0.0, 0.0, 1.0, 4.0, 5.0, 5.0, 4.0, 0.0],
-        'accept_radius': 2.0,
+        'waypoints_z': [0.0, 0.5, 1.0, 2.0, 2.0, 1.5, 1.0, 0.0],
+        'accept_radius': 0.5,
         }]
     )
+    
     eval_nav = Node(
         package='uav_gnc',
         executable='tracking_eval_node',
@@ -95,17 +93,17 @@ def generate_launch_description():
             'input_odom_topic': '/nav/odom',
             'csv_path': 'nav_tracking_eval.csv',
             'rate_hz': 20.0,
-            # guidance.yaml에서 웨이포인트를 바꾸면, 여기서도 수정 필요
-            # 'waypoints_x': [0.0, 5.0, 5.0, 0.0, 0.0],
-            # 'waypoints_y': [0.0, 0.0, 5.0, 5.0, 0.0],
+            # 3D 웨이포인트로 변경함
             'waypoints_x': [0.0, 4.0, 5.0, 5.0, 4.0, 1.0, 0.0, 0.0],
             'waypoints_y': [0.0, 0.0, 1.0, 4.0, 5.0, 5.0, 4.0, 0.0],
-            'accept_radius': 2.0,
+            'waypoints_z': [0.0, 0.5, 1.0, 2.0, 2.0, 1.5, 1.0, 0.0],
+            'accept_radius': 0.5,
             'auto_exit_on_complete': True,
-            'settle_time_sec': 1.0,   # 완주 후 1초만 더 기록하고 종료 (원하면 0으로)
+            'settle_time_sec': 1.0,   
         }]
     )
-    # ✅ eval_nav 프로세스가 종료되면, 전체 bringup을 Shutdown
+    
+    # eval_nav 프로세스가 종료되면, 전체 bringup을 Shutdown
     shutdown_on_eval_done = RegisterEventHandler(
         OnProcessExit(
             target_action=eval_nav,

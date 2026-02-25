@@ -148,6 +148,15 @@ private:
 
     state_ = rk4_step(state_, u_copy, params_, dt_);
 
+    // ===== 지면 충돌(Ground Collision) 방지 로직 =====
+    // 시뮬레이터 상에서 드론이 땅(Z=0) 밑으로 뚫고 내려가지 않도록 강제함 (음슴체)
+    if (state_.p.z < 0.0) {
+        state_.p.z = 0.0;          // 위치를 바닥으로 고정
+        if (state_.v.z < 0.0) {
+            state_.v.z = 0.0;      // 떨어지던 속도 소멸
+        }
+    }
+
     // Odometry publish
     nav_msgs::msg::Odometry odom; // 드론/로봇의 상태를 나타내는 표준 메시지 타입
     odom.header.stamp = this->now(); // 메시지가 생성된 시간, stamp를 통해 time synchronization 가능

@@ -148,6 +148,7 @@ Input controller_update(const State& s, const Ref& ref, const Params& params, co
     // double vz_cmd = gains.kp_pos_z  * e_p.z;
     // 수평과 수직 dynamics가 다르고, 튜닝도 다르므로 z축은 별도 게인 사용.
     vz_cmd = clamp(vz_cmd, -gains.max_vz_cmd, gains.max_vz_cmd); // 오버슈트 감소용
+    
     // =====================
     // 3) Velocity -> Acceleration (P 제어 + 가속도 피드포워드)
     // 원하는 속도를 만들기 위한 가속도 명령 생성.
