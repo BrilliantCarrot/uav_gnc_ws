@@ -77,10 +77,10 @@ def generate_launch_description():
         'csv_path': 'sim_tracking_eval.csv',
         'rate_hz': 20.0,
         # 3D 웨이포인트로 변경함
-        'waypoints_x': [0.0, 4.0, 5.0, 5.0, 4.0, 1.0, 0.0, 0.0],
-        'waypoints_y': [0.0, 0.0, 1.0, 4.0, 5.0, 5.0, 4.0, 0.0],
-        'waypoints_z': [0.0, 0.5, 1.0, 2.0, 2.0, 1.5, 1.0, 0.0],
-        'accept_radius': 0.5,
+        'waypoints_x': [0.0, 4.0, 6.0, 6.0, 4.0, 0.0, -2.0, -2.0, 0.0],
+        'waypoints_y': [0.0, 0.0, 2.0, 6.0, 8.0, 8.0, 6.0, 2.0, 0.0],
+        'waypoints_z': [0.0, 0.5, 1.0, 1.5, 2.0, 1.5, 1.0, 0.5, 0.0],
+        'accept_radius': 1.0,
         }]
     )
     
@@ -94,10 +94,10 @@ def generate_launch_description():
             'csv_path': 'nav_tracking_eval.csv',
             'rate_hz': 20.0,
             # 3D 웨이포인트로 변경함
-            'waypoints_x': [0.0, 4.0, 5.0, 5.0, 4.0, 1.0, 0.0, 0.0],
-            'waypoints_y': [0.0, 0.0, 1.0, 4.0, 5.0, 5.0, 4.0, 0.0],
-            'waypoints_z': [0.0, 0.5, 1.0, 2.0, 2.0, 1.5, 1.0, 0.0],
-            'accept_radius': 0.5,
+            'waypoints_x': [0.0, 4.0, 6.0, 6.0, 4.0, 0.0, -2.0, -2.0, 0.0],
+            'waypoints_y': [0.0, 0.0, 2.0, 6.0, 8.0, 8.0, 6.0, 2.0, 0.0],
+            'waypoints_z': [0.0, 0.5, 1.0, 1.5, 2.0, 1.5, 1.0, 0.5, 0.0],
+            'accept_radius': 1.0,
             'auto_exit_on_complete': True,
             'settle_time_sec': 1.0,   
         }]

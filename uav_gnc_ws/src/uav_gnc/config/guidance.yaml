@@ -12,15 +12,15 @@ guidance_node:
     guidance_mode: "multi_snap" 
     
     # 뾰족한 모서리를 잘라내고 진입/진출점을 명시하여 '둥근 사각형' 유도 (칠각형) + 3D 고도 추가
-    waypoints_x: [0.0, 4.0, 5.0, 5.0, 4.0, 1.0, 0.0, 0.0]
-    waypoints_y: [0.0, 0.0, 1.0, 4.0, 5.0, 5.0, 4.0, 0.0]
-    waypoints_z: [0.0, 0.5, 1.0, 2.0, 2.0, 1.5, 1.0, 0.0] # z축 웨이포인트 추가함
+    waypoints_x: [0.0, 4.0, 6.0, 6.0, 4.0, 0.0, -2.0, -2.0, 0.0]
+    waypoints_y: [0.0, 0.0, 2.0, 6.0, 8.0, 8.0, 6.0, 2.0, 0.0]
+    waypoints_z: [0.0, 0.5, 1.0, 1.5, 2.0, 1.5, 1.0, 0.5, 0.0] # z축 웨이포인트 추가함
 
     # 6주차 (Look-ahead) 용 파라미터
-    accept_radius: 2.0          
+    accept_radius: 1.0          
     lookahead_dist: 1.5         
 
     # 7주차 (Polynomial) 용 파라미터
-    avg_speed: 1.1 # 코너 진입 속도
+    avg_speed: 1.5 # 코너 진입 속도
     
     hold_last: true
