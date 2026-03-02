@@ -24,7 +24,7 @@ EKF::EKF() {
     P_.block<3, 3>(6, 6) *= 0.01;  // Att 자세는 0.1rad(약 5도) 정도로 정확하다고 가정
     P_.block<3, 3>(9, 9) *= 0.01;  // Acc Bias
     P_.block<3, 3>(12, 12) *= 0.001; // Gyro Bias 자이로는 상대적으로 더 정확함
-    // Process Noise 행렬(모델의 한계, Q), 튜닝 파라미터
+    // Process Noise 행렬(시스템 노이즈 행렬, 모델의 한계, Q), 튜닝 파라미터
     // 시스템 모델이 시간이 지나며 얼마나 흔들리는지, 모델이 얼마나 불확실한지, 즉
     // 시간이 흐를 때 수학 모델이 실제 물리 현상과 얼마나 달라질 수 있는가 불확실성을 정의
     // 실제 센서를 다룰 때에는 대각 행렬 형태로 간단히 초기화한 후 튜닝하는 경우가 많음
@@ -44,6 +44,7 @@ EKF::EKF() {
     R_gps_ = MatrixXd::Identity(3, 3) * 30.0; // 튜닝 전 GPS 오차 약 0.5m -> 공분산 행렬에 들어갈 값은 제곱인 0.25 
     // 튜닝으로 0.25->2.0->5.0->10.0
     // 외란 추가할 시 더 크게 10->30->50
+    // 측정 노이즈가 크면 더 큰 값으로 설정하여 노이즈에 강건하게 반응
     // R_gps_(2, 2) = 50; // 3,3 행렬에만 노이즈를 변경(0,0 이나 1,1 등 다르게 수정하여 축 별 노이즈 설정 가능)
     // P(나의 불확실성)에 비해 R(센서 불확실성)이 작으면: 센서가 정확하므로 센서 측정값(z)에 더 의존, 결과가 빠르지만 노이즈가 심해짐
     // P에 비해 R이 크면: 센서가 부정확하므로 모델 예측값에 더 의존, 결과가 부드럽지만 실제 움직임을 따라가는 반응 속도가 느림
@@ -60,18 +61,22 @@ void EKF::init(const Vector3d& p, const Vector3d& v, const Eigen::Quaterniond& q
     q_.normalize(); // 중요, 계산 과정에서 발생할 수 있는 미세한 오차를 제거하여 항상 쿼터니언 크기를 1로 강제 조정
 }
 
+// 추측 단계, 물리 모델에 따라 거동
 void EKF::predict(const Vector3d& acc_meas, const Vector3d& gyro_meas, double dt) {
     // GPS가 들어오기 전, 아주 짧은 dt동안 IMU 데이터를 믿고 다음 위치를 추측하는 시간 업데이트 단계
     // [DEBUG] dt가 튀는지, P 행렬이 터지는지 확인
     // std::cout을 쓰려면 맨 위에 #include <iostream> 확인
+    // Vector 3d는 세로로 긴 열 벡터, Matrix3d는 n x n 행렬
     if (dt > 1.0 || dt < 0.0) std::cout << "[Warning] Bad dt: " << dt << std::endl;
     // 1. 현재 상태 가져오기
     Vector3d pos = x_.segment<3>(0);
     Vector3d vel = x_.segment<3>(3);
+    //자세 오차 6,7,8 이 없는건, 예측 단계에서 실제 자세 변화는 q_라는 별도의 쿼터니언 변수가 담당하고, 
+    // 상태 벡터 내부의 자세 오차는 보정 단계에서 GPS가 들어올 때 까지 0으로 대기하는 값이라 굳이 꺼낼 필요 없음
     Vector3d ba  = x_.segment<3>(9);
     Vector3d bg  = x_.segment<3>(12);
 
-    // 2. 입력 보정 (Measurement(meas) - Bias), 실제 센서값에는 일정 오차인 바이어스가 포함되너있음
+    // 2. 입력 보정 (Measurement(meas) - Bias), 실제 센서값에는 일정 오차인 바이어스가 포함되어 있음
     // 이를 빼주어야 순수한 물리량에 가까운 unbiased 값을 얻음
     Vector3d acc_unbiased = acc_meas - ba;
     Vector3d gyro_unbiased = gyro_meas - bg;
@@ -79,7 +84,10 @@ void EKF::predict(const Vector3d& acc_meas, const Vector3d& gyro_meas, double dt
     // 3. Nominal State(명목 상태) 적분 (비선형 예측)
     // 비선형 동역학 수식을 사용하여 위치, 속도, 자세를 업데이트
     // 위치/속도 업데이트: 뉴턴 운동 법칙을 따름
-    // Position Update
+    // Position Update: dt시간 동안 드론이 어디로 이동했는지 계산
+    // s= v0*​t + 1/2​ * at^2
+    // 괄호 안이 지구 좌표계(World Frame)에서의 순수 가속도
+    // Body 가속도를 World로 회전 후 중력 빼어 순수 가속도를 계산 (velocity update에도 동일)
     pos += vel * dt + 0.5 * (q_ * acc_unbiased - Vector3d(0, 0, g_)) * dt * dt;
     // Velocity Update
     // Body 가속도를 World로 회전 후 중력 빼어 순수 가속도를 계산
@@ -87,14 +95,15 @@ void EKF::predict(const Vector3d& acc_meas, const Vector3d& gyro_meas, double dt
     vel += acc_world * dt;
 
     // Attitude Update (Quaternion kinematics)
+    // 짧은 dt 시간 동안 드론이 어느 방향으로, 얼마나 회전했는가를 계산하여 현재의 자세를 업데이트
     // q_dot = 0.5 * q * omega
-    // 작은 회전 가정 (소각 근사), 실제로는 dq.w() = sqrt(1 - |omega|^2)로 계산할 수도 있지만, 작은 dt에서는 1에 매우 가까움
+    // 작은 회전 가정 (소각 근사, small angle approximation), 실제로는 dq.w() = sqrt(1 - |omega|^2)로 계산할 수도 있지만, 작은 dt에서는 1에 매우 가까움
     // 기존 자세에 회전량을 곱해 새로운 자세를 구한 뒤, 수치적 오차를 잡기 위해 정규화
     Eigen::Quaterniond dq;
     Vector3d omega = gyro_unbiased * dt * 0.5;
     dq.w() = 1.0; 
-    dq.vec() = omega; // 소각 근사
-    q_ = q_ * dq;
+    dq.vec() = omega; // 소각 근사, 회전량 부분은 1이고, 벡터 부분은 회전량의 절반의 소각 근사 공식
+    q_ = q_ * dq; // 현재 자세(q_)에 방금 계산한 회전 변화량(dq)를 곱해 새로운 자세를 구함
     q_.normalize();
 
     // 4. Jacobian F 행렬 계산 (15x15, EKF의 핵심인 선형화 단계)
@@ -103,9 +112,9 @@ void EKF::predict(const Vector3d& acc_meas, const Vector3d& gyro_meas, double dt
     // ex) 지금 속도가 불확실 -> F 행렬의 (0,3) 블록(dt) 때문에 다음 스탬에서는 위치도 불확실해짐을 EKF가 스스로 판단하도록 함
     // 사용중인 상태 벡터는 15차원(위치 3, 속도 3, 자세 오차 3, 가속도 바이어스 3, 자이로 바이어스 3)
     // Error State Kinematics의 선형화 행렬
-    MatrixXd F = MatrixXd::Identity(15, 15);
-    // 기본적인 15x15 단위 행렬로 시작, 아무 외부 입력이 없다면 다음 상태는 현재 상태와 같다는 관성 의미
-    Matrix3d R = q_.toRotationMatrix();
+    MatrixXd F = MatrixXd::Identity(15, 15); // 기본적인 15x15 단위 행렬로 시작, 아무 외부 입력이 없다면 다음 상태는 현재 상태와 같다는 관성 의미
+    
+    Matrix3d R = q_.toRotationMatrix(); //쿼터니언 형태의 회전 정보를 3x3 회전 행렬로 변환
 
     // 속도가 위치에 주는 영향, dp/dv = I * dt
     // 현재 속도가 빠르면, 다음 위치가 변한다
@@ -121,7 +130,9 @@ void EKF::predict(const Vector3d& acc_meas, const Vector3d& gyro_meas, double dt
     acc_skew << 0, -acc_unbiased.z(), acc_unbiased.y(),
                 acc_unbiased.z(), 0, -acc_unbiased.x(),
                 -acc_unbiased.y(), acc_unbiased.x(), 0;
-    F.block<3, 3>(3, 6) = -R * acc_skew * dt; // 현재 자세(R)에서 가속도 오차가 발생했을 때 속도가 어떻게 변하는가
+    F.block<3, 3>(3, 6) = -R * acc_skew * dt; // 현재 자세(R)에서 가속도 오차가 발생했을 때 속도가 어떻게 변하는가,
+    // 자세 오차가 속도 오차로 전이되는 양을 계산,
+    // 물리적 의미: 자세가 틀리면 드론이 중력을 엉뚱한 방향으로 계산하게 되어 속도(v) 오차가 발생한다
 
     // 가속도 바이어스가 속도에 주는 영향, dv/dba = -R * dt
     // 센서가 매 순간 일정한 오차(바이어스)를 가지고 있으면, 속도 계산이 틀려진다
@@ -154,6 +165,8 @@ void EKF::predict(const Vector3d& acc_meas, const Vector3d& gyro_meas, double dt
     x_.segment<3>(0) = pos;
     x_.segment<3>(3) = vel;
     // Attitude Error는 항상 0으로 리셋 (Error-State 방식의 특징)
+    // 왜냐면 쿼터니언은 덧셈이 안되고, 차원이 불일치하고(3D vs 4D), 자세는 보정 전까지 계산 안함
+    // 자세 오차는 보정할 때만 잠깐 쓰고 다시 0으로 리셋한다
     // 하지만 P 행렬에는 오차가 누적됨.
 
     // nan 디버그용
@@ -164,11 +177,13 @@ void EKF::predict(const Vector3d& acc_meas, const Vector3d& gyro_meas, double dt
 
 // 보정 단계, 예측 단계에서 이정도만큼 움직였을것이다라고 추측한 값과, GPS가 실제로 알려준 위치 값 사이 간극을 줄여나가는 단계
 void EKF::update_gps(const Vector3d& meas_pos) {
-    // 1. 측정 모델 행렬 H (GPS는 위치만 측정하므로 15x15 중 앞 3x3만 Identity) 정의
+    // 1. 관측 행렬(측정 모델 행렬) H (GPS는 위치만 측정하므로 15x15 중 앞 3x3만 Identity) 정의
+    // 15개의 드론 상태 중에서 지금 들어온 센서(GPS)가 무엇을 볼 수있나를 정의
     // 사용중인 전체 상태 벡터 x는 15차원, GPS는 위치 3차원 정보만 줌, H 행렬은 15차원 상태에서 위치에 해당하는 앞부분 3개만 뽑아내는 필터 역할
     // z = Hx + v
     MatrixXd H = MatrixXd::Zero(3, 15);
-    H.block<3, 3>(0, 0) = Matrix3d::Identity(); // 앞 3x3 블록만 Identity를 넣어 위치 값만 보겠다 선언
+    H.block<3, 3>(0, 0) = Matrix3d::Identity(); // 앞 3x3 블록만 Identity를 넣어 위치 값만 보겠다 선언,
+    // GPS는 위치 정보만 주기 때문, 15차원 상태 벡터에서 앞만 추출하여 실제 GPS 측정값과 비교하기 위해 
 
     // 2. 칼만 이득 계산, K = P * H' * (H * P * H' + R)^-1
     // 칼만 이득: 내가 예측한 값(P)를 더 믿을지, 아니면 GPS 측정값(R)을 더 믿을지 결정
@@ -177,6 +192,7 @@ void EKF::update_gps(const Vector3d& meas_pos) {
     MatrixXd PHt = P_ * H.transpose();
     MatrixXd S = H * PHt + R_gps_; // Innovation Covariance
     MatrixXd K = PHt * S.inverse();
+    // K 역할: 예를 들어 위치가 1m 틀리면, 속도 줄이고, 피치 올리고 등 3차원 오차(y)를 15 차원의 전체 상태 오차(dx)로 골고루 분배(mapping)
 
     // 3. 잔차(Residual/Innovation) 계산, y = z - Hx
     // 이론과 실제의 차이를 계산, GPS가 알려준 위치(meas_pos)와 내가 예측한 위치(pred_pos) 사이의 차이
@@ -184,13 +200,15 @@ void EKF::update_gps(const Vector3d& meas_pos) {
     Vector3d y = meas_pos - pred_pos;
 
     // 4. 상태 업데이트, x = x + K * y
-    // 계산된 오차(y)에 가중치(K)를 곱해서 실제 상태 값에 주입하는 과정
-    VectorXd dx = K * y;
-    // 명목 상태 업데이트 (Injection)
+    // 계산된 오차(dx(잔차, Residual), 여기선 y)에 가중치(K)를 곱해서 실제 상태 값에 주입하는 과정
+    VectorXd dx = K * y; // GPS를 보고 내가 실제랑 얼마나 차이나는지의 오차량(dx)를 계산함
+    // 명목 상태 업데이트 (수정/주입, Injection), 현재 상태에서 그 오차만큼만 더해서 교정함
+    // 현재 내가 믿고있는 상태(x_)dp GPS가 알려준 보정치(dx)를 반영하여 상태를 업데이트
     x_.segment<3>(0) += dx.segment<3>(0); // Pos
     x_.segment<3>(3) += dx.segment<3>(3); // Vel
     x_.segment<3>(9) += dx.segment<3>(9); // Acc Bias
     x_.segment<3>(12) += dx.segment<3>(12); // Gyro Bias
+    
     // Attitude Update(특이사항) (Error Quaternion Injection)
     // 자세 오차는 상태 벡터에 직접 포함되어 있지 않고, 별도의 쿼터니언(q_)으로 관리되고 있기 때문에, 자세 업데이트는 별도로 처리
     // 따라서 오차 각도(dθ)를 계산한 뒤, 이를 아주 작은 회전량인 dq로 변환해서 기존 쿼터니언 q_에 곱해주는 방식을 씀, 이를 통해 자세를 부드럽게 보정
@@ -210,4 +228,8 @@ void EKF::update_gps(const Vector3d& meas_pos) {
     // 다음 스탭에서는 더 정확한 예측을 시작할 수 있음
     MatrixXd I = MatrixXd::Identity(15, 15);
     P_ = (I - K * H) * P_;
+    // 불확실성의 감소
+    // I: 기존 100% 불확실성
+    // K * H: GPS를 받아오며 새롭게 얻은 정보량(확신)
+    // 물리적 의미: 100%의 불확실성에서 GPS를 통해 얻은 확신만큼 빼면, 남은 불확실의 비율이 나오고, 여기에 기존 불확실성(P_)를 곱하여 오차 범위를 줄임
 }
