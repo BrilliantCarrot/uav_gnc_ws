@@ -41,13 +41,13 @@ private:
     // 9~11: Accel Bias (b_ax, b_ay, b_az)
     // 12~14: Gyro Bias (b_gx, b_gy, b_gz)
     VectorXd x_; 
-    // 공분산 행렬 P_ (15x15)
+    // 오차 공분산 행렬 P_ (15x15)
     MatrixXd P_;
     // 명목 상태(Nominal State)의 자세 (Quaternion)
     Eigen::Quaterniond q_;
     // 파라미터: 노이즈 공분산
-    MatrixXd Q_; // Process Noise Covariance
-    MatrixXd R_gps_; // Measurement Noise Covariance (GPS)
+    MatrixXd Q_; // Process Noise Covariance 시스템 노이즈 행렬
+    MatrixXd R_gps_; // Measurement Noise Covariance (GPS) 측정 노이즈 행렬
     // 상수
     const double g_ = 9.80665;
 };
