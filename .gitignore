@@ -34,3 +34,6 @@ obj/
 *.csv
 *.zip
 *.png
+*.jpg
+*.txt
+__pycache__/
