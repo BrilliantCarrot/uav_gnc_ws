@@ -43,8 +43,11 @@ public:
     lookahead_dist_ = this->declare_parameter<double>("lookahead_dist", 1.5); // 앞을 내다보는 거리
     
     // 7주차용 파라미터 (궤적 생성용)
+    // 수학적으로 게산된 궤적을 실제 물리적인 시간 축에 배치하고, 비행 미션의 마무리를 안전하게 처리하기 위해 필요
+    // avg_speed: 시간 항 T 값을 정해주는 기준, 궤적 생성 시 dist/avg_spped를 통해 각 국간의 소요 시간(T) 계산
+    // 사용자가 원하는 평균적인 비행속도를 입력하면, 알고리즘이 이에 맞춰 역학적으로 무리가 없는 시간표를 자동으로 짜 줌
     avg_speed_ = this->declare_parameter<double>("avg_speed", 1.0); // 평균 이동 속도
-    hold_last_ = this->declare_parameter<bool>("hold_last", true);  // 마지막에 멈출지 여부
+    hold_last_ = this->declare_parameter<bool>("hold_last", true);  // 최종 목적지에서 멈출지 여부
 
     // ---------------------------------------------------
     // 2. Pub / Sub 및 타이머 설정
@@ -102,24 +105,38 @@ private:
   // ---------------------------------------------------
   void generateTrajectoryForCurrentSegment() {
     if (wp_index_ >= wp_x_.size() - 1) return; // 이미 끝에 도달함
-    
+    // 맨 처음 출발점
     double p0_x = wp_index_ == 0 ? current_x_ : wp_x_[wp_index_];
     double p0_y = wp_index_ == 0 ? current_y_ : wp_y_[wp_index_];
     double p0_z = wp_index_ == 0 ? current_z_ : wp_z_[wp_index_]; // Z축 시작점 추가함
-    
+    // 웨이포인터에서 시작할 시 출발점
     double pf_x = wp_x_[wp_index_ + 1];
     double pf_y = wp_y_[wp_index_ + 1];
     double pf_z = wp_z_[wp_index_ + 1]; // Z축 도착점 추가함
 
-    // 두 점 사이의 거리를 3차원 유클리드 거리로 계산하여 '목표 시간(T)'을 구함 (C++17 std::hypot 3인자 오버로딩 활용)
+    // 두 점 사이의 거리를 3차원 유클리드 거리로 계산하여 '목표 시간(T)'을 구함
+    // C++17 std::hypot 3인자 오버로딩 활용
+    // std::hypot: 3차원 유클리드 거리 계산, 현재 위치에서 목표 위치까지 직선 거리(변위의 크기)를 구함
     double dist = std::hypot(pf_x - p0_x, pf_y - p0_y, pf_z - p0_z);
+    // 거리 = 속력 x 시간 공식을 이용해 드론이 부드럽게 이동 가능한 적정 시간을 계산
+    // std::max: 아무리 거리가 가까워도 최소한 0.1초 시간을 할당, 연산 안정성을 보장하고 드론이 급격하게 요동치는 것을 막아줌
     current_segment_T_ = std::max(0.1, dist / avg_speed_);
 
     if (guidance_mode_ == "min_jerk") {
+      // 시작/도착 물리량을 0으로 넣음
+      // 현재 지점에서 정지 상태로 출발하여, 다음 지점에 도착했을 때도 정지 상태로 멈춰라
+      // 이 값을 다른 값으로 넣는다면 해당 지점을 특정 속도로 통과
+      // 드론의 시작 상태, 도착 상태, 걸리는 시간을 의미
+      // 3 차원 공간(x,y,z)에서의 움직임을 각각 독립된 1차원 문제로 나누어 해결
+      // p(t) = c_0 + c_1t + c_2t^2 + c_3t^3 + c_4t^4 + c_5t^5 식을 미분하면 속도 v(t)와 가속도 a(t)를 얻을 수 있음
+      // 속도: v(t) = dot{p}(t) = c_1 + 2c_2t + 3c_3t^2 + 4c_4t^3 + 5c_5t^4
+      // 가속도: a(t) = ddot{p}(t) = 2c_2 + 6c_3t + 12c_4t^2 + 20c_5t^3 + 30c_6t^4
+      // generate 함수를 호출하는 이유는 6개의 계수(c0~c5)를 찾기 위함
       jerk_x_.generate(p0_x, 0.0, 0.0, pf_x, 0.0, 0.0, current_segment_T_);
       jerk_y_.generate(p0_y, 0.0, 0.0, pf_y, 0.0, 0.0, current_segment_T_);
       jerk_z_.generate(p0_z, 0.0, 0.0, pf_z, 0.0, 0.0, current_segment_T_); // Z축 저크 궤적 생성함
     } else {
+      // p0,v0,a0,j0,pf,vf,af,jf,T, 여기선 jerk가 추가 됨
       snap_x_.generate(p0_x, 0.0, 0.0, 0.0, pf_x, 0.0, 0.0, 0.0, current_segment_T_);
       snap_y_.generate(p0_y, 0.0, 0.0, 0.0, pf_y, 0.0, 0.0, 0.0, current_segment_T_);
       snap_z_.generate(p0_z, 0.0, 0.0, 0.0, pf_z, 0.0, 0.0, 0.0, current_segment_T_); // Z축 스냅 궤적 생성함
@@ -132,6 +149,7 @@ private:
   // ---------------------------------------------------
   // 5. 다중 구간 궤적 생성 (Multi-segment Minimum Snap)
   // 모든 웨이포인트를 한 번에 스캔해서 부드러운 레이싱 트랙을 만듬
+  // XY 평면은 고차 다항식 최적화를 사용, Z축(고도)는 선형 보간을 사용하는 하이브리드 방식
   // ---------------------------------------------------
   void generateMultiSegmentTrajectory() {
     std::vector<double> full_wp_x, full_wp_y, full_wp_z, times;
@@ -153,12 +171,13 @@ private:
         full_wp_x.push_back(wp_x_[i]);
         full_wp_y.push_back(wp_y_[i]);
         full_wp_z.push_back(wp_z_[i]); // Z축 웨이포인트 추가함
-        times.push_back(dist / avg_speed_); // 각 구간별 시간 할당
+        times.push_back(dist / avg_speed_); // 사용자가 설정한 평균 속도를 기준으로 각 구간별 시간 할당
     }
 
     if (times.empty()) return;
 
     // 수학 엔진(trajectory.cpp)에 배열을 통째로 넘겨서 3D 행렬 방정식을 품 (Z축 제외)
+    // 모든 구간의 연결점에서 속도, 가속도, jerk, snap이 연속되도록 하는 8N x 8N 행렬 방정식을 품
     multi_snap_x_.generate(full_wp_x, times);
     multi_snap_y_.generate(full_wp_y, times);
     
@@ -191,31 +210,40 @@ private:
     if (guidance_mode_ == "lookahead") {
       const size_t N = wp_x_.size();
       if (wp_index_ >= N) wp_index_ = N - 1;
-      
+      // 타겟 웨이포인트 위치와 현재 드론 위치 사이의 상대적인 거리와 방향을 구함
+      // 방향 벡터 (dx, dy, dz): 각 축별로 목표점까지 얼마나 남았는지를 계산
       double dx = wp_x_[wp_index_] - current_x_;
       double dy = wp_y_[wp_index_] - current_y_;
       double dz = wp_z_[wp_index_] - current_z_; // Z축 방향 벡터 계산함
       
       double dist = std::hypot(dx, dy, dz); // 3D 거리 계산함
-
+      // 드론이 목표점에 충분히 가까워졌는지를 판단하여 다음 목표로 넘어감
       // 목표 반경 안에 들어왔으면 다음 Waypoint로 인덱스 증가
       if (dist < accept_radius_) {
         if (wp_index_ + 1 < N) wp_index_++;
         else if (!hold_last_) return;
       }
-      
+
+      // 가상 목표점(Setpoint, sp) 생성: Look-ahead  핵심
       // Look-ahead: 현재 위치에서 3D 목표를 향해 일정 거리(L)만큼만 당겨서 명령함
+      // 먼 목표점을 그대로 주지 않고, 내 코앞에 있는 지점을 계속 따라오라고 지시
+      // Psp​ = Pcurr ​+ Unit Vector × min(L,dist)
+      // min(L, dist): 미리 정해둔 내다보는 거리(L, lookahead_dist)와 실제 남은 거리 중 작은 값을 선택
+      // 목표물이 멀리 있다면 현재 위치에서 목표 방향으로 L m만큼 떨어진 지점을 목표 위치로 잡은
+      // 목표물이 가까워져서 거리가 L보다 작다면, 실제 목표물까지의 거리를 사용
+      // 결과적으로 내 앞에서 웨이포인트 방향으로 L만큼 떨어진 가상의 점을 쫒아 궤적이 더 부드러워짐
       double spx = (dist < 1e-6) ? wp_x_[wp_index_] : current_x_ + (dx / dist) * std::min(lookahead_dist_, dist);
       double spy = (dist < 1e-6) ? wp_y_[wp_index_] : current_y_ + (dy / dist) * std::min(lookahead_dist_, dist);
       double spz = (dist < 1e-6) ? wp_z_[wp_index_] : current_z_ + (dz / dist) * std::min(lookahead_dist_, dist);
 
       sp.pose.pose.position.x = spx; 
       sp.pose.pose.position.y = spy;
-      sp.pose.pose.position.z = spz; // Z축 목표 위치 세팅함
+      sp.pose.pose.position.z = spz;
       
       sp.pose.pose.orientation = yawToQuat(std::atan2(spy - current_y_, spx - current_x_)); // 진행 방향 바라보기
 
       // Z축을 포함하여 방향 벡터 기반으로 피드포워드 속도 인가함
+      // (dx / dist)가 단위 벡터
       sp.twist.twist.linear.x = (dist < 1e-6) ? 0.0 : (dx / dist) * avg_speed_;
       sp.twist.twist.linear.y = (dist < 1e-6) ? 0.0 : (dy / dist) * avg_speed_;
       sp.twist.twist.linear.z = (dist < 1e-6) ? 0.0 : (dz / dist) * avg_speed_;
