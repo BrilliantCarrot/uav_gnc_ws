@@ -136,7 +136,7 @@ def analyze_and_plot(csv_file, title_prefix, save_dir):
     plt.savefig(save_path_3d, dpi=300)
 
 if __name__ == '__main__':
-    save_directory = '/home/lyj/master/uav_gnc_ws'
+    save_directory = '/home/lyj/uav_gnc_ws'
     analyze_and_plot('sim_tracking_eval.csv', 'Simulation Only (Ideal)', save_directory)
     analyze_and_plot('nav_tracking_eval.csv', 'Navigation (EKF with Noise)', save_directory)
     plt.show()
