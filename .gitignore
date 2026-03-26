@@ -3,6 +3,8 @@ bags/
 build/
 install/
 log/
+*.gv
+*.pdf
 # ROS2 runtime
 *.bag
 *.bag.active
