@@ -27,3 +27,12 @@ control_node:
     max_axy_cmd: 10.0
     max_vz_cmd: 5.0   # 기존 2.0 -> 5.0
     max_az_cmd: 10.0  # 기존 6.0 -> 10.0
+    # ===== Linear MPC 제어기 설정 =====
+    use_mpc: true
+    mpc_N: 15
+    mpc_q_pos_xy: 50.0
+    mpc_q_pos_z:  200.0
+    mpc_q_vel_xy: 20.0
+    mpc_q_vel_z:  30.0
+    mpc_r_acc_xy: 2.0
+    mpc_r_acc_z:  0.5

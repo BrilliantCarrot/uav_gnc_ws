@@ -24,3 +24,7 @@ guidance_node:
     avg_speed: 1.5 # 코너 진입 속도
     
     hold_last: true
+
+    # [Reference Preview] MPC의 horizon 및 제어 주기 — control.yaml의 mpc_N, dt와 일치시킬 것
+    mpc_preview_N: 15      # MPC 예측 horizon 스텝 수
+    mpc_preview_dt: 0.01   # MPC 제어 주기 (s)

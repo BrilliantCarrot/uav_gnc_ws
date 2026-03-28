@@ -8,6 +8,7 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include "uav_gnc/trajectory.h" // 궤적 생성기 헤더
+#include <std_msgs/msg/float64_multi_array.hpp> // MPC trajectory preview용
 
 using namespace std::chrono_literals;
 
@@ -49,6 +50,11 @@ public:
     avg_speed_ = this->declare_parameter<double>("avg_speed", 1.0); // 평균 이동 속도
     hold_last_ = this->declare_parameter<bool>("hold_last", true);  // 최종 목적지에서 멈출지 여부
 
+    // [Reference Preview] MPC의 예측 horizon과 제어 주기 파라미터
+    // control.yaml의 mpc_N, dt와 일치시켜야 함
+    mpc_N_  = this->declare_parameter<int>("mpc_preview_N", 15);   // MPC horizon 스텝 수
+    mpc_dt_ = this->declare_parameter<double>("mpc_preview_dt", 0.01); // MPC 제어 주기(s)
+
     // ---------------------------------------------------
     // 2. Pub / Sub 및 타이머 설정
     // ---------------------------------------------------
@@ -60,6 +66,11 @@ public:
       
     // 제어기에게 목표 위치(Setpoint)를 명령하는 Publisher
     setpoint_pub_ = this->create_publisher<nav_msgs::msg::Odometry>(setpoint_topic_, 10);
+
+    // [Reference Preview] MPC가 사용할 미래 N스텝 궤적을 퍼블리시
+    // 형식: [px0,py0,pz0,vx0,vy0,vz0, px1,..., pxN-1,...,vzN-1] (N*6 값)
+    preview_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+      "/guidance/trajectory_preview", 10);
 
     // rate_hz_(예: 20Hz = 0.05초)마다 onTimer 함수를 실행시키는 타이머
     const auto period = std::chrono::duration<double>(1.0 / std::max(1.0, rate_hz_));
@@ -194,6 +205,64 @@ private:
   }
 
   // ---------------------------------------------------
+  // publishTrajectoryPreview(): MPC Reference Preview 퍼블리시
+  // multi_snap 궤적이 활성화됐을 때, 현재 시간 t로부터
+  // mpc_N_ 스텝 앞까지의 위치/속도를 다항식에서 평가하여 퍼블리시
+  // ---------------------------------------------------
+  void publishTrajectoryPreview(double t_now) {
+    if (!is_trajectory_active_) return;  // 궤적 비활성 시 퍼블리시 안 함
+
+    std_msgs::msg::Float64MultiArray msg;
+    msg.data.reserve(mpc_N_ * 6);  // N * [px,py,pz,vx,vy,vz]
+
+    for (int k = 1; k <= mpc_N_; ++k) {
+      // k스텝 후 시간: t_now + k*mpc_dt_
+      double t_k = t_now + static_cast<double>(k) * mpc_dt_;
+
+      // 다항식 궤적에서 해당 시간의 위치/속도 평가
+      // t_k가 total_multi_T_를 초과하면 마지막 waypoint 위치/속도=0 유지
+      double px, py, pz, vx, vy, vz;
+
+      if (t_k >= total_multi_T_) {
+        // 궤적 종료 후: 마지막 웨이포인트에서 정지
+        px = wp_x_.back(); py = wp_y_.back(); pz = wp_z_.back();
+        vx = 0.0;          vy = 0.0;          vz = 0.0;
+      } else {
+        // 다항식에서 위치/속도 평가
+        px = multi_snap_x_.getPosition(t_k);
+        py = multi_snap_y_.getPosition(t_k);
+        vx = multi_snap_x_.getVelocity(t_k);
+        vy = multi_snap_y_.getVelocity(t_k);
+
+        // Z축: 선형 보간 (multi_snap의 Z 오버슈트 방지 설계 유지)
+        double accum = 0.0;
+        size_t idx = 0;
+        for (size_t i = 0; i < multi_times_.size(); ++i) {
+          if (t_k <= accum + multi_times_[i]) { idx = i; break; }
+          accum += multi_times_[i];
+          idx = i;
+        }
+        if (idx >= multi_times_.size()) idx = multi_times_.size() - 1;
+        double seg_t = t_k - accum;
+        double seg_T = multi_times_[idx];
+        double ratio = (seg_T > 0.0) ? std::max(0.0, std::min(1.0, seg_t / seg_T)) : 1.0;
+        pz = multi_wp_z_[idx] + ratio * (multi_wp_z_[idx + 1] - multi_wp_z_[idx]);
+        vz = (seg_T > 0.0) ? (multi_wp_z_[idx + 1] - multi_wp_z_[idx]) / seg_T : 0.0;
+      }
+
+      // [px, py, pz, vx, vy, vz] 순서로 packed
+      msg.data.push_back(px);
+      msg.data.push_back(py);
+      msg.data.push_back(pz);
+      msg.data.push_back(vx);
+      msg.data.push_back(vy);
+      msg.data.push_back(vz);
+    }
+
+    preview_pub_->publish(msg);
+  }
+
+  // ---------------------------------------------------
   // 6. 메인 타이머 루프 (제어기에게 계속 Setpoint 쏘기)
   // 20Hz(0.05초)마다 실행되면서 드론을 이끌어 줌
   // ---------------------------------------------------
@@ -306,6 +375,10 @@ private:
     else if (guidance_mode_ == "multi_snap") {
       if (is_trajectory_active_) {
         double t = (this->now() - segment_start_time_).seconds();
+
+        // [Reference Preview] MPC가 사용할 미래 궤적을 100ms마다 퍼블리시
+        // guidance가 20Hz이므로 매 onTimer() 호출마다 퍼블리시
+        publishTrajectoryPreview(t);
         
         // 1. XY 위치 타겟 설정함 (다항식 기반)
         sp.pose.pose.position.x = multi_snap_x_.getPosition(t);
@@ -407,6 +480,11 @@ private:
   bool is_trajectory_active_{false};
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr setpoint_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr preview_pub_; // MPC trajectory preview
+
+  // [Reference Preview] MPC horizon 파라미터 (control.yaml과 일치)
+  int    mpc_N_{15};    // 예측 horizon 스텝 수
+  double mpc_dt_{0.01}; // MPC 제어 주기 (s)
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
