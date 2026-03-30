@@ -165,7 +165,7 @@ def plot_comparison_grid(cases, save_dir):
 
     # 전체 Figure 생성 (4행 × 4열, 3D 서브플롯 포함)
     fig = plt.figure(figsize=(22, 18))
-    fig.suptitle('UAV GNC Performance Comparison\n(Case1: PID Clean | Case2: MPC Clean | Case3: PID Wind | Case4: MPC+I Wind)',
+    fig.suptitle('UAV GNC Performance Comparison\n(Case1: PID Clean | Case2: MPC Clean | Case3: PID Noise | Case4: MPC+I Noise)',
                  fontsize=14, fontweight='bold', y=0.98)
 
     # 열 제목 (첫 번째 행 위에 표시)
@@ -283,7 +283,7 @@ if __name__ == '__main__':
     WP = {
         'x': [0.0, 4.0, 6.0, 6.0, 4.0, 0.0, -2.0, -2.0, 0.0],
         'y': [0.0, 0.0, 2.0, 6.0, 8.0, 8.0,  6.0,  2.0, 0.0],
-        'z': [2.0, 1.5, 1.0, 1.5, 2.0, 1.5,  1.0,  1.5, 2.0],
+        'z': [0.0, 1.5, 1.0, 1.5, 2.0, 1.5,  1.0,  1.5, 2.0],
     }
 
     analyze_and_plot('case4_2_sim_tracking_eval.csv', 'Simulation Only (Ideal)', save_directory, waypoints=WP)
@@ -300,18 +300,18 @@ if __name__ == '__main__':
         {
             'label'  : 'Case2\nMPC (Clean)',
             'sim_csv': '/home/lyj/uav_gnc_ws/case2_sim_tracking_eval.csv',
-            'color'  : 'seagreen',
+            'color'  : 'steelblue',
         },
         {
             'label'  : 'Case3\nPID (Wind)',
             'sim_csv': '/home/lyj/uav_gnc_ws/case3_sim_tracking_eval.csv',
-            'color'  : 'darkorange',
+            'color'  : 'steelblue',
         },
         {
             'label'  : 'Case4\nMPC+I (Wind)',
             # 최종 튜닝 결과(case4_2) 사용
             'sim_csv': '/home/lyj/uav_gnc_ws/case4_2_sim_tracking_eval.csv',
-            'color'  : 'crimson',
+            'color'  : 'steelblue',
             'waypoints': WP,
         },
     ]

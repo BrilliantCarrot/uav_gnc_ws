@@ -77,6 +77,8 @@ This project implements a complete UAV GNC (Guidance, Navigation, and Control) p
 
 **Robustness:** PID degraded by ×1.21 under wind; MPC+I degraded by ×2.29.
 
+![Performance Comparison](docs/comparison_grid.png)
+
 > Trajectory: 9-waypoint heptagon with 3D altitude variation (Z: 1.0 ~ 2.0 m),  
 > avg_speed = 1.5 m/s, sim/nav evaluated separately (EKF + GPS 0.5 m noise)
 
