@@ -36,3 +36,9 @@ control_node:
     mpc_q_vel_z:  30.0
     mpc_r_acc_xy: 2.0
     mpc_r_acc_z:  0.5
+    # ===== MPC+I 적분 보상 게인 (바람 등 지속 외란 보상) =====
+    # ki 값이 너무 크면 오버슈트, 너무 작으면 수렴이 느림
+    # max_int_pos: anti-windup 한계 (m/s² 단위로 누적 가속도 상한)
+    mpc_ki_pos_xy:   0.2
+    mpc_ki_pos_z:    0.1
+    mpc_max_int_pos: 4.0

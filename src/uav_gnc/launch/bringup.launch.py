@@ -80,7 +80,7 @@ def generate_launch_description():
         'waypoints_x': [0.0, 4.0, 6.0, 6.0, 4.0, 0.0, -2.0, -2.0, 0.0],
         'waypoints_y': [0.0, 0.0, 2.0, 6.0, 8.0, 8.0, 6.0, 2.0, 0.0],
         'waypoints_z': [2.0, 1.5, 1.0, 1.5, 2.0, 1.5, 1.0, 1.5, 2.0],
-        'accept_radius': 1.0,
+        'accept_radius': 1.0, # MPC는 3.0
         }]
     )
     
@@ -99,7 +99,7 @@ def generate_launch_description():
             'waypoints_z': [2.0, 1.5, 1.0, 1.5, 2.0, 1.5, 1.0, 1.5, 2.0],
             'accept_radius': 1.0,
             'auto_exit_on_complete': True,
-            'settle_time_sec': 1.0,   
+            'settle_time_sec': 1.0, # MPC는 3.0
         }]
     )
     

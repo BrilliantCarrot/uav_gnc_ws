@@ -557,30 +557,43 @@ Input MPCController::update(const State& s, const Ref& ref)
     //                         └──게인──┘ └오차┘
 
     // ═══════════════════════════════════════════════════════════════
-    // STEP 5. 가속도 명령 추출 + feedforward 미사용 (설계 결정)
+    // STEP 5. 가속도 명령 추출 + 적분 보상항 추가 (MPC+I)
     //
-    // u0(0~2): MPC 피드백이 계산한 world frame 가속도 명령 [ax, ay, az]
+    // u0(0~2): MPC 비례 피드백이 계산한 world frame 가속도 명령 [ax, ay, az]
     //
     // [왜 a_ref(feedforward)를 제거했나?]
-    //   PID에서 a_ref가 필요한 이유:
-    //     PID는 위치 오차 → 속도 명령 → 가속도 명령으로 간접 계산
-    //     guidance의 미래 가속도(a_ref)를 직접 받지 못하므로 feedforward로 보완
+    //   MPC의 Xref에 이미 v_ref(목표 속도)가 포함되어 있음.
+    //   K_first_가 속도 오차를 통해 가속도를 암묵적으로 계산하므로
+    //   a_ref까지 더하면 이중 인가 → 실험으로 확인 후 제거함.
     //
-    //   MPC에서 a_ref가 불필요한 이유:
-    //     MPC의 Xref에 이미 v_ref(목표 속도)가 포함되어 있음
-    //     K_first_가 속도 오차(e₀의 vx~vz 항)를 보고
-    //     "v_ref를 따라가려면 이만큼 가속해야 해"를 이미 암묵적으로 계산
-    //     여기에 a_ref까지 더하면 같은 가속 요구를 두 번 인가 → 이중 인가
-    //     실험 확인: a_ref 제거 후 비행시간이 24.25s로 PID 수준에 복귀
-    //
-    // [주석 처리된 이전 코드]
-    // const double ax_cmd = u0(0) + ref.a_ref.x;  ← 이중 인가 문제
-    // const double ay_cmd = u0(1) + ref.a_ref.y;
-    // const double az_cmd = u0(2) + ref.a_ref.z;
+    // [적분 보상항 추가 이유 (MPC+I)]
+    //   MPC는 K_first × e₀ 형태의 순수 비례 피드백임.
+    //   바람처럼 지속적인 외란이 있으면 정상 상태 위치 오차가 계속 남음.
+    //   위치 오차를 dt_씩 적분하여 가속도 보상항으로 더해줌.
+    //   → 외란을 누적 감지하여 점진적으로 보상 (PID의 ki_vel과 동일 역할)
+    //   anti-windup: 적분값이 max_int_pos를 넘지 않도록 클램핑함.
     // ═══════════════════════════════════════════════════════════════
-    const double ax_cmd = u0(0);  // MPC 피드백만 사용 (feedforward 없음)
-    const double ay_cmd = u0(1);
-    const double az_cmd = u0(2);
+
+    // 현재 위치 오차 (world frame): 목표 위치 - 실제 위치
+    const double ep_x = ref.p_ref.x - s.p.x;
+    const double ep_y = ref.p_ref.y - s.p.y;
+    const double ep_z = ref.p_ref.z - s.p.z;
+
+    // 위치 오차 적분 (dt_: 제어 주기, 기본 0.01s)
+    integral_pos_.x += ep_x * dt_;
+    integral_pos_.y += ep_y * dt_;
+    integral_pos_.z += ep_z * dt_;
+
+    // anti-windup: 적분 포화 방지
+    const double mi = mpc_p_.max_int_pos;
+    integral_pos_.x = std::max(-mi, std::min(mi, integral_pos_.x));
+    integral_pos_.y = std::max(-mi, std::min(mi, integral_pos_.y));
+    integral_pos_.z = std::max(-mi, std::min(mi, integral_pos_.z));
+
+    // MPC 비례 피드백 + 적분 보상 합산
+    const double ax_cmd = u0(0) + mpc_p_.ki_pos_xy * integral_pos_.x;
+    const double ay_cmd = u0(1) + mpc_p_.ki_pos_xy * integral_pos_.y;
+    const double az_cmd = u0(2) + mpc_p_.ki_pos_z  * integral_pos_.z;
 
     // ═══════════════════════════════════════════════════════════════
     // STEP 6. 자세 제어 inner loop으로 넘기기

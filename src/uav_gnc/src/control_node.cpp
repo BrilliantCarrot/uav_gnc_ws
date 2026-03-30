@@ -107,6 +107,11 @@ public:
             mpc_params_.r_acc_xy = this->declare_parameter<double>("mpc_r_acc_xy", 1.0);
             mpc_params_.r_acc_z  = this->declare_parameter<double>("mpc_r_acc_z",  0.5);
 
+            // MPC+I 적분 보상 게인 (바람 등 지속 외란 보상용)
+            mpc_params_.ki_pos_xy   = this->declare_parameter<double>("mpc_ki_pos_xy",   0.3);
+            mpc_params_.ki_pos_z    = this->declare_parameter<double>("mpc_ki_pos_z",    0.2);
+            mpc_params_.max_int_pos = this->declare_parameter<double>("mpc_max_int_pos", 2.0);
+
             mpc_controller_.init(mpc_params_, params_, gains_, dt_);
             // 노드가 켜지는 순간 Φ, Γ, H, K_first_를 한 번에 계산
             // 이후 런타임에서는 K_first_ 만 사용. 파라미터가 바뀌면 노드를 재시작해야 함.

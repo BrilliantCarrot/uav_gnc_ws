@@ -107,6 +107,15 @@ struct MPCParams {
     // 가속도 입력 크기에 대한 패널티, 클수록 MPC가 가속도를 아껴서 부드럽게 제어
     double r_acc_xy = 1.0;
     double r_acc_z  = 0.5;
+
+    // ── 적분 보상 게인 (MPC+I) ────────────────────────────────────────
+    // MPC는 순수 비례 피드백(K_first × e₀)만 계산하므로,
+    // 바람처럼 지속적인 외란이 있으면 정상 상태 오차(steady-state error)가 남음.
+    // 위치 오차를 누적(적분)해서 가속도 보상항으로 더해주는 방식으로 해결함.
+    // PID의 ki_vel과 동일한 역할을 MPC outer loop에서 수행함.
+    double ki_pos_xy   = 0.3;  // XY 위치 적분 게인 (너무 크면 오버슈트, 작으면 수렴 느림)
+    double ki_pos_z    = 0.2;  // Z  위치 적분 게인
+    double max_int_pos = 2.0;  // 적분기 포화 방지(anti-windup) 한계값 [m/s² 단위]
 };
 
 // ======================================================================
@@ -182,6 +191,7 @@ private:
     // Reference Preview 관련
     bool            has_preview_{false};   // preview 수신 여부
     Eigen::VectorXd preview_Xref_;         // N·nx × 1, guidance가 제공한 미래 궤적
+
     // 이번 주에 추가한 핵심 부분. Xref(90차원 참조 벡터)를 어떻게 만드느냐에 따라 MPC 동작이 완전히 달라짐.
 
     // 기존 방식 (has_preview_ = false):
@@ -250,4 +260,10 @@ private:
     // 빠른 기동 (비선형 영역)	선형화 오차 발생               	   ✅ 매번 (LPV-MPC)
     // NMPC	                비선형 모델 직접 사용	           ✅ 매번 (계산 부담 큰 이유)
 
+    
+    // ── 적분 보상항 (MPC+I) ───────────────────────────────────────────
+    // 바람 등 지속 외란으로 인한 정상 상태 위치 오차를 누적하여 보상함.
+    // update()가 100Hz로 호출될 때마다 dt_씩 적분되며,
+    // max_int_pos 한계로 anti-windup 처리됨.
+    Vec3 integral_pos_{0.0, 0.0, 0.0};
 };
