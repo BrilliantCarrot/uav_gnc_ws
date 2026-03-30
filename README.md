@@ -21,7 +21,7 @@ This project implements a complete UAV GNC (Guidance, Navigation, and Control) p
 ## System Architecture
 
 ```
-![ROS2 Node Graph](./docs/rosgraph.png)
+![ROS2 Node Graph](https://github.com/BrilliantCarrot/uav_gnc_ws/blob/dev/docs/rosgraph.png?raw=true)
 ```
 
 | Node | Responsibility | Rate |
