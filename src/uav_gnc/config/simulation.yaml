@@ -10,6 +10,12 @@ simulation_node:
     k1: 0.15
     k2: 0.02
     # ===== 강인함(robustness) 테스트용 악조건 테스트 파라미터 =====
+    # 11 주차에서 테스트할 때 파라미터값들:
+    # Case	wind_x	wind_y	noise_gps	      use_mpc	  목적
+    # Case 1	0.0	0.0	      0.01	          false	    PID 이상 조건 (비교 기준)
+    # Case 2	0.0	0.0	      0.01	          true	    MPC 이상 조건
+    # Case 3	1.0	1.0	      0.5	            false	    PID 바람+노이즈
+    # Case 4	1.0	1.0	      0.5	            true	    MPC 바람+노이즈
     # GPS 노이즈 줄이면 ekf.cpp의 R_gps 행렬값도 줄여줘야됨(10 정도로)
     noise_gps: 0.5   # 기존 0.5 -> 1.0로 노이즈 2배 증가(저가형 GPS 썼다 가정, 궤적 생성에 상당히 비중 있음)
     wind_x: 1.0      # X 방향으로 지속적으로 미는 바람 (N)

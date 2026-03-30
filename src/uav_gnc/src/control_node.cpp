@@ -8,6 +8,13 @@
 #include <uav_gnc/sixdof.h>
 #include <uav_gnc/controller.h>
 
+// #include <std_msgs/msg/float64_multi_array.hpp>
+// guidance_node가 미래 N스텝 궤적을 퍼블리시하는 토픽 /guidance/trajectory_preview의 
+//메시지 타입이 Float64MultiArray. 이 타입을 쓰려면 해당 헤더를 포함해야 함.
+// Float64MultiArray는 double 값들의 배열을 ROS 토픽으로 보내는 가장 단순한 방법. 
+//우리는 여기에 [px0, py0, pz0, vx0, vy0, vz0, px1, ..., vz14] 형태로 
+// N×6 = 90개의 double 값을 담아서 보내.
+
 using namespace std::chrono_literals;
 
 // ======================================================================
@@ -21,6 +28,31 @@ using namespace std::chrono_literals;
 //   → MPCController::setTrajectoryPreview()
 //   → update() 내부에서 preview Xref 사용
 //   → guidance 속도에 맞춰 비행 (앞서가기/멈춤 현상 해소)
+
+// ## 전체 데이터 흐름 정리
+// 
+// guidance_node (20Hz)
+//     │ /guidance/trajectory_preview (Float64MultiArray, 90개 double)
+//     ▼
+// preview_sub_ 콜백 (ROS executor 스레드)
+//     │ lock(mtx_)
+//     │ mpc_controller_.setTrajectoryPreview(msg->data)
+//     │   → preview_Xref_ 저장
+//     │   → has_preview_ = true
+//     ▼
+// onTimer() (타이머 스레드, 100Hz)
+//     │ lock(mtx_) → s, ref 복사 → unlock
+//     │
+//     ├─ use_mpc_=true  → mpc_controller_.update(s, ref)
+//     │                      → has_preview_=true: X_ref = preview_Xref_
+//     │                      → e0 = X_ref - Φ·x₀
+//     │                      → u0 = K_first_ · e0
+//     │                      → attitude_and_thrust() → Input u
+//     │
+//     └─ use_mpc_=false → controller_update() (PID) → Input u
+//     │
+//     ▼
+// /control/wrench 퍼블리시 → simulation_node → 6-DOF 모델
 // ======================================================================
 class ControlNode : public rclcpp::Node
 {
@@ -66,6 +98,7 @@ public:
         use_mpc_ = this->declare_parameter<bool>("use_mpc", false);
 
         if (use_mpc_) {
+            // declare_parameter<타입>("파라미터명", 기본값)
             mpc_params_.N        = this->declare_parameter<int>("mpc_N",        15);
             mpc_params_.q_pos_xy = this->declare_parameter<double>("mpc_q_pos_xy", 100.0);
             mpc_params_.q_pos_z  = this->declare_parameter<double>("mpc_q_pos_z",  200.0);
@@ -75,9 +108,20 @@ public:
             mpc_params_.r_acc_z  = this->declare_parameter<double>("mpc_r_acc_z",  0.5);
 
             mpc_controller_.init(mpc_params_, params_, gains_, dt_);
+            // 노드가 켜지는 순간 Φ, Γ, H, K_first_를 한 번에 계산
+            // 이후 런타임에서는 K_first_ 만 사용. 파라미터가 바뀌면 노드를 재시작해야 함.
 
-            // Preview 구독: guidance가 미래 N스텝 궤적을 퍼블리시하는 토픽
+            // Preview_sub: guidance가 미래 N스텝 궤적을 퍼블리시하는 토픽
             // setTrajectoryPreview()로 MPC에 전달 → Xref 업데이트
+            // [this]는 람다가 this 포인터(현재 노드 객체)를 캡처한다는 뜻. 
+            // 이 람다는 /guidance/trajectory_preview 토픽에 메시지가 올 때마다 자동으로 실행. 
+            // 별도의 콜백 멤버 함수를 만들지 않고 inline으로 처리.
+
+            // ROS2는 멀티스레드로 동작. preview_sub_ 콜백은 ROS executor 스레드에서 실행되고, 
+            // onTimer()도 타이머 스레드에서 실행. 두 스레드가 동시에 mpc_controller_에 접근하면 
+            // 데이터가 꼬일 수 있음(race condition). lock_guard가 mutex를 잡아서 
+            // 한 번에 하나의 스레드만 접근하도록 보장. lock_guard는 스코프를 벗어나면 
+            // 자동으로 unlock돼서 데드락 위험이 없음.
             preview_sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
                 "/guidance/trajectory_preview", 10,
                 [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
@@ -135,9 +179,11 @@ private:
     void setpointCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
         std::lock_guard<std::mutex> lock(mtx_);
+         // Odometry는 pose.pose.position 형태로 한 번 더 들어가야 함
         ref_.p_ref = { msg->pose.pose.position.x,
                        msg->pose.pose.position.y,
                        msg->pose.pose.position.z };
+        // Odometry는 pose.pose.position 형태로 한 번 더 들어가야 함
         ref_.v_ref = { msg->twist.twist.linear.x,
                        msg->twist.twist.linear.y,
                        msg->twist.twist.linear.z };
@@ -168,12 +214,14 @@ private:
         if (use_mpc_) {
             u = mpc_controller_.update(s, ref);
         } else {
+                // 제어 계산 결과를 ROS 메시지로 바꿔서 시뮬레이터로 보냄
+    // u: 힘/모멘트, s: 현재상태, ref: 목표상태, params_: 기체물성치, gains_: 제어이득
             u = controller_update(s, ref, params_, gains_, dt_, int_e_v_);
         }
 
         geometry_msgs::msg::WrenchStamped wrench;
         wrench.header.stamp    = this->now();
-        wrench.header.frame_id = "base_link";
+        wrench.header.frame_id = "base_link";  // sim_node는 body frame 입력이라고 가정 중
         wrench.wrench.force.x  = u.thrust_body.x;
         wrench.wrench.force.y  = u.thrust_body.y;
         wrench.wrench.force.z  = u.thrust_body.z;

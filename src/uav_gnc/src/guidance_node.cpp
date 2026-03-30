@@ -204,63 +204,148 @@ private:
     total_multi_T_ = multi_snap_x_.getTotalTime(); // 총 비행시간 기록
   }
 
-  // ---------------------------------------------------
-  // publishTrajectoryPreview(): MPC Reference Preview 퍼블리시
-  // multi_snap 궤적이 활성화됐을 때, 현재 시간 t로부터
-  // mpc_N_ 스텝 앞까지의 위치/속도를 다항식에서 평가하여 퍼블리시
-  // ---------------------------------------------------
-  void publishTrajectoryPreview(double t_now) {
-    if (!is_trajectory_active_) return;  // 궤적 비활성 시 퍼블리시 안 함
+// ======================================================================
+// publishTrajectoryPreview()
+//
+// [목적]
+//   MPC가 "지금 당장 저기 가야 해"가 아닌
+//   "궤적이 이 속도로 앞으로 이동 중이다"를 인지하도록,
+//   현재 시간 t_now 이후 N스텝의 미래 궤적을 다항식에서 직접 평가하여
+//   /guidance/trajectory_preview 토픽으로 퍼블리시하는 함수임.
+//
+// [왜 이 함수가 필요한가]
+//   기존 onTimer()는 현재 시간 t의 setpoint 1개만 퍼블리시했음.
+//   MPC는 이 단일 setpoint를 N번 복사해 Xref를 만들었는데,
+//   "지금 당장 저기 있어야 해"로 해석 → 최대 가속 → guidance보다
+//   빠르게 날아버리는 구조적 불일치(time parameterization mismatch) 발생.
+//
+//   이 함수는 multi_snap 다항식이 이미 전체 미래 궤적 정보를 갖고 있다는
+//   점을 활용함. t+dt, t+2dt, ..., t+N×dt 시점의 위치/속도를 루프 한 번으로
+//   뽑아서 배열로 담아 MPC에 전달하면, MPC의 Xref가 정적인 점이 아닌
+//   시간에 따라 이동하는 궤적으로 바뀜.
+//
+// [인자]
+//   t_now: multi_snap 궤적 시작 시점으로부터 흐른 시간 (초)
+//          onTimer()에서 (this->now() - segment_start_time_).seconds()로 계산됨
+//
+// [퍼블리시 형식]
+//   Float64MultiArray, 크기 N × 6
+//   배열 구조: [px0, py0, pz0, vx0, vy0, vz0,   ← 1스텝 후 (t + 1×dt)
+//               px1, py1, pz1, vx1, vy1, vz1,   ← 2스텝 후 (t + 2×dt)
+//               ...
+//               px_{N-1}, ..., vz_{N-1}]         ← N스텝 후 (t + N×dt)
+//
+// [호출 위치]
+//   onTimer() 내부, multi_snap 모드 + is_trajectory_active_ 조건 진입 직후
+//   guidance가 20Hz로 타이머를 돌리므로 이 함수도 20Hz로 실행됨
+// ======================================================================
+void publishTrajectoryPreview(double t_now) {
+
+    // 궤적이 비활성 상태(아직 시작 전이거나 이미 완료)면 퍼블리시 안 함.
+    // preview 데이터가 없는 상태에서 MPC는 자동으로 상수 참조(fallback)를 사용함.
+    if (!is_trajectory_active_) return;
 
     std_msgs::msg::Float64MultiArray msg;
-    msg.data.reserve(mpc_N_ * 6);  // N * [px,py,pz,vx,vy,vz]
 
+    // 배열 크기를 미리 예약해 메모리 재할당 방지 (N × 6개 double)
+    msg.data.reserve(mpc_N_ * 6);
+
+    // ── k = 1 ~ N 루프: 미래 각 스텝의 상태 계산 ──────────────────────
+    // k=0은 현재 시간(t_now)이므로 생략. MPC horizon의 첫 번째 참조는
+    // 1스텝 후(t_now + dt)부터 시작함.
     for (int k = 1; k <= mpc_N_; ++k) {
-      // k스텝 후 시간: t_now + k*mpc_dt_
-      double t_k = t_now + static_cast<double>(k) * mpc_dt_;
 
-      // 다항식 궤적에서 해당 시간의 위치/속도 평가
-      // t_k가 total_multi_T_를 초과하면 마지막 waypoint 위치/속도=0 유지
-      double px, py, pz, vx, vy, vz;
+        // k스텝 후의 절대 시간 계산
+        // mpc_dt_: MPC 한 스텝의 시간 간격 (= control_node의 dt, 기본 0.01s)
+        // 예) k=1 → t_now + 0.01s,  k=15 → t_now + 0.15s
+        double t_k = t_now + static_cast<double>(k) * mpc_dt_;
 
-      if (t_k >= total_multi_T_) {
-        // 궤적 종료 후: 마지막 웨이포인트에서 정지
-        px = wp_x_.back(); py = wp_y_.back(); pz = wp_z_.back();
-        vx = 0.0;          vy = 0.0;          vz = 0.0;
-      } else {
-        // 다항식에서 위치/속도 평가
-        px = multi_snap_x_.getPosition(t_k);
-        py = multi_snap_y_.getPosition(t_k);
-        vx = multi_snap_x_.getVelocity(t_k);
-        vy = multi_snap_y_.getVelocity(t_k);
+        double px, py, pz, vx, vy, vz;
 
-        // Z축: 선형 보간 (multi_snap의 Z 오버슈트 방지 설계 유지)
-        double accum = 0.0;
-        size_t idx = 0;
-        for (size_t i = 0; i < multi_times_.size(); ++i) {
-          if (t_k <= accum + multi_times_[i]) { idx = i; break; }
-          accum += multi_times_[i];
-          idx = i;
+        // ── 분기 1: t_k가 전체 궤적 시간을 초과한 경우 ──────────────
+        // 예) 총 비행시간 24s인데 t_k = 24.1s 라면?
+        // 다항식 외삽이 아닌, 마지막 웨이포인트에서 정지 상태를 넣어줌.
+        // 이유: 다항식은 정의된 구간 밖에서 값이 튀는 Runge 현상이 생길 수 있어서,
+        //       종료 후에는 안전하게 정지 상태(속도=0)를 목표로 줌.
+        if (t_k >= total_multi_T_) {
+            px = wp_x_.back();  // 마지막 웨이포인트 X
+            py = wp_y_.back();  // 마지막 웨이포인트 Y
+            pz = wp_z_.back();  // 마지막 웨이포인트 Z
+            vx = 0.0;           // 정지 상태 (속도 0)
+            vy = 0.0;
+            vz = 0.0;
+
+        // ── 분기 2: 정상 범위 — 다항식에서 직접 평가 ────────────────
+        } else {
+            // XY 위치/속도: multi_snap 다항식(7차 다항식)에서 t_k 시점의 값을 평가
+            // multi_snap_x_, multi_snap_y_는 trajectory.cpp에서 구현된
+            // MultiMinSnapTrajectory 객체로, 전체 구간의 다항식 계수를 저장하고 있음.
+            // getPosition(t): 해당 시간에 속하는 구간의 다항식 p(t) 계산
+            // getVelocity(t): 해당 시간에 속하는 구간의 dp/dt(t) 계산
+            px = multi_snap_x_.getPosition(t_k);
+            py = multi_snap_y_.getPosition(t_k);
+            vx = multi_snap_x_.getVelocity(t_k);
+            vy = multi_snap_y_.getVelocity(t_k);
+
+            // Z축 위치/속도: 선형 보간 (Linear Interpolation)
+            // ※ Z축을 다항식이 아닌 선형 보간으로 처리하는 이유:
+            //   Z 방향으로도 min_snap 다항식을 쓰면 고도가 웨이포인트 사이에서
+            //   위아래로 크게 출렁이는 오버슈트(Runge's Phenomenon)가 발생했음.
+            //   (고도 변화 구간이 짧아 다항식 진동이 심해지는 현상)
+            //   따라서 guidance_node는 처음부터 Z는 선형 보간으로 설계됨.
+            //   preview에서도 이 원칙을 그대로 유지해 onTimer()와 일관성을 보장함.
+
+            // t_k가 전체 구간 중 몇 번째 구간(idx)에 속하는지 탐색
+            // multi_times_[i]: i번째 구간에 할당된 소요 시간
+            double accum = 0.0;  // 구간 시작까지의 누적 시간
+            size_t idx   = 0;    // 현재 구간 인덱스
+            for (size_t i = 0; i < multi_times_.size(); ++i) {
+                if (t_k <= accum + multi_times_[i]) {
+                    idx = i;
+                    break;
+                }
+                accum += multi_times_[i];
+                idx = i;  // 루프 끝까지 도달하면 마지막 구간으로 설정
+            }
+            // 인덱스 범위 초과 방지 (배열 out-of-bounds 방어)
+            if (idx >= multi_times_.size()) idx = multi_times_.size() - 1;
+
+            // 현재 구간 내에서의 진행 비율(ratio) 계산
+            // seg_t: 이 구간 시작 시점부터 t_k까지 흐른 시간
+            // seg_T: 이 구간에 할당된 총 시간
+            // ratio: 0.0(구간 시작) ~ 1.0(구간 끝) 사이의 진행률
+            double seg_t = t_k - accum;
+            double seg_T = multi_times_[idx];
+            double ratio = (seg_T > 0.0)
+                ? std::max(0.0, std::min(1.0, seg_t / seg_T))
+                : 1.0;  // seg_T가 0이면 구간 끝으로 처리 (0 나누기 방지)
+
+            // 선형 보간으로 Z 위치 계산
+            // pz = 구간 시작 Z + (구간 끝 Z - 구간 시작 Z) × 진행률
+            pz = multi_wp_z_[idx] + ratio * (multi_wp_z_[idx + 1] - multi_wp_z_[idx]);
+
+            // 선형 보간에서의 Z 속도 = (고도 변화량) / (구간 소요 시간)
+            // 등속도 운동이므로 구간 내내 일정한 값을 가짐
+            vz = (seg_T > 0.0)
+                ? (multi_wp_z_[idx + 1] - multi_wp_z_[idx]) / seg_T
+                : 0.0;
         }
-        if (idx >= multi_times_.size()) idx = multi_times_.size() - 1;
-        double seg_t = t_k - accum;
-        double seg_T = multi_times_[idx];
-        double ratio = (seg_T > 0.0) ? std::max(0.0, std::min(1.0, seg_t / seg_T)) : 1.0;
-        pz = multi_wp_z_[idx] + ratio * (multi_wp_z_[idx + 1] - multi_wp_z_[idx]);
-        vz = (seg_T > 0.0) ? (multi_wp_z_[idx + 1] - multi_wp_z_[idx]) / seg_T : 0.0;
-      }
 
-      // [px, py, pz, vx, vy, vz] 순서로 packed
-      msg.data.push_back(px);
-      msg.data.push_back(py);
-      msg.data.push_back(pz);
-      msg.data.push_back(vx);
-      msg.data.push_back(vy);
-      msg.data.push_back(vz);
+        // ── 계산된 k스텝 후 상태를 배열에 추가 ────────────────────────
+        // MPC의 setTrajectoryPreview()는 이 순서를 기대함:
+        // [px, py, pz, vx, vy, vz] 6개가 한 스텝
+        msg.data.push_back(px);
+        msg.data.push_back(py);
+        msg.data.push_back(pz);
+        msg.data.push_back(vx);
+        msg.data.push_back(vy);
+        msg.data.push_back(vz);
     }
 
+    // 완성된 N×6 배열을 /guidance/trajectory_preview로 퍼블리시
+    // control_node의 preview_sub_ 콜백이 이를 수신해 setTrajectoryPreview()로 전달
     preview_pub_->publish(msg);
-  }
+}
 
   // ---------------------------------------------------
   // 6. 메인 타이머 루프 (제어기에게 계속 Setpoint 쏘기)

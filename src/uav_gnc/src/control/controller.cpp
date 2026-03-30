@@ -453,53 +453,146 @@ void MPCController::precompute()
 }
 
 // ── update ────────────────────────────────────────────────────────────
-// [핵심 변경] preview가 있으면 preview Xref 사용, 없으면 상수 참조 fallback
+// 매 100Hz마다 호출되는 MPC 실시간 제어 루프
+//
+// [전체 흐름]
+//   x₀ 구성 → Xref 구성 → e₀ = Xref - Φ·x₀ → u₀* = K_first·e₀ → 자세 제어
+//
+// [계산 부담]
+//   핵심 연산은 행렬-벡터 곱 1회 (K_first: 3×90, e₀: 90×1 → 270 MACs)
+//   precompute()에서 K_first_를 사전 계산해두기 때문에 가능한 구조
+// ─────────────────────────────────────────────────────────────────────
 Input MPCController::update(const State& s, const Ref& ref)
 {
-    // 현재 상태 x₀
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 1. 현재 상태 벡터 x₀ 구성 (6×1)
+    //
+    // navigation_node의 EKF가 추정한 현재 상태를 Eigen 벡터로 변환
+    // x₀ = [px, py, pz, vx, vy, vz]ᵀ
+    //
+    // 이게 MPC의 출발점: "나는 지금 여기 있고, 이 속도로 움직이고 있다"
+    // ═══════════════════════════════════════════════════════════════
     Eigen::VectorXd x0(nx_);
-    x0 << s.p.x, s.p.y, s.p.z,
-          s.v.x, s.v.y, s.v.z;
+    x0 << s.p.x, s.p.y, s.p.z,   // 현재 위치 (EKF 추정, world frame)
+          s.v.x, s.v.y, s.v.z;   // 현재 속도 (EKF 추정, world frame)
 
-    // ── Xref 구성: preview 우선, 없으면 상수 참조 fallback ───────────
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 2. 목표 궤적 Xref 구성 (N·nx × 1 = 90×1)
+    //
+    // Xref = "앞으로 N스텝 동안 드론이 있어야 할 목표 상태 시퀀스"
+    // 구조: [x_ref_1, x_ref_2, ..., x_ref_N]
+    //        각 x_ref_k = [px, py, pz, vx, vy, vz] (6차원)
+    //
+    // ┌─ Preview 모드 (정상 동작) ────────────────────────────────┐
+    // │ guidance_node가 다항식에서 미래 위치/속도를 직접 계산하여 │
+    // │ /guidance/trajectory_preview 토픽으로 퍼블리시한 데이터   │
+    // │ Xref[k] = t + k*dt 시점의 실제 궤적 위치/속도            │
+    // │ → MPC가 "궤적이 앞으로 이동 중"임을 정확히 인지           │
+    // │ → guidance 속도에 맞춰 비행 → 앞서가기/멈춤 현상 완화     │
+    // └───────────────────────────────────────────────────────────┘
+    // ┌─ Fallback 모드 (초기화 직후 / guidance 꺼진 경우) ────────┐
+    // │ 현재 setpoint(ref.p_ref, ref.v_ref)를 N번 그대로 복사     │
+    // │ 문제: MPC가 "지금 당장 저기 가야 해"로 해석               │
+    // │ → 최대 가속 → guidance 시간표보다 빠르게 날아버림          │
+    // │ → 앞서버린 후 역가속 발생 → 진동 또는 중간 지점 멈춤      │
+    // └───────────────────────────────────────────────────────────┘
+    // ═══════════════════════════════════════════════════════════════
     Eigen::VectorXd X_ref(mpc_p_.N * nx_);
 
     if (has_preview_) {
-        // [Reference Preview 모드]
-        // guidance_node가 미래 N스텝 궤적을 계산해서 보낸 것을 그대로 사용
-        // Xref[k] = t + k*dt 시점의 실제 궤적 위치/속도
-        // → MPC가 "궤적이 앞으로 이동 중"임을 정확히 인지
-        // → guidance 속도에 맞춰 비행하므로 앞서가기/멈춤 현상 해소
+        // [Preview 모드]
+        // setTrajectoryPreview()가 수신한 미래 궤적 배열을 그대로 사용
+        // 형식: [px0,py0,pz0,vx0,vy0,vz0, px1,..., pxN-1,...,vzN-1]
         X_ref = preview_Xref_;
     } else {
         // [Fallback: 상수 참조]
-        // preview 수신 전(초기화 직후) 또는 guidance가 꺼진 경우
-        // 현재 setpoint를 N번 복사 (기존 방식)
+        // 현재 setpoint를 N번 복사 → 시간 파라미터 불일치 문제 발생
+        // preview가 안정적으로 수신되면 이 경로는 사실상 사용되지 않음
         Eigen::VectorXd x_ref(nx_);
-        x_ref << ref.p_ref.x, ref.p_ref.y, ref.p_ref.z,
-                 ref.v_ref.x, ref.v_ref.y, ref.v_ref.z;
+        x_ref << ref.p_ref.x, ref.p_ref.y, ref.p_ref.z,  // 목표 위치
+                 ref.v_ref.x, ref.v_ref.y, ref.v_ref.z;   // 목표 속도
         for (int k = 0; k < mpc_p_.N; ++k)
-            X_ref.segment(k * nx_, nx_) = x_ref;
+            X_ref.segment(k * nx_, nx_) = x_ref;  // 동일 setpoint N번 반복
     }
 
-    // 오차 e₀ = Xref - Φ·x₀
-    // Φ·x₀: 입력 없을 때의 자연 응답 (관성에 의한 미래 궤적)
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 3. 오차 벡터 e₀ 계산 (N·nx × 1 = 90×1)
+    //
+    // e₀ = Xref - Φ·x₀
+    //
+    // Φ·x₀: "지금부터 아무 가속도도 주지 않을 때 (관성만으로) 드론이
+    //         앞으로 N스텝 동안 어떻게 움직이는가" = 자연 응답
+    //   Φ·x₀[k번째 블록] = Ad^(k+1)·x₀  (k+1 스텝 후 자연 상태)
+    //   예: 지금 vx=1.0m/s이면, Φ·x₀는 0.01초마다 1cm씩 앞으로 가는 궤적
+    //
+    // e₀: "자연 응답과 목표 궤적의 차이 → MPC가 교정해야 할 양"
+    //   e₀[k번째 블록] = (k스텝 후 목표) - (k스텝 후 자연 응답)
+    //   e₀가 크면 MPC가 더 큰 가속도를 출력
+    //   e₀ = 0이면 자연 응답이 이미 목표와 일치 → 가속도 불필요
+    // ═══════════════════════════════════════════════════════════════
     const Eigen::VectorXd e0 = X_ref - Phi_ * x0;
+    //                         └─목표─┘  └─자연응답─┘
 
-    // 최적 가속도: u₀* = K_first · e₀  (핵심 연산: 행렬-벡터 곱 1회)
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 4. 최적 첫 번째 가속도 u₀* 계산 (3×1)
+    //
+    // u₀* = K_first_ · e₀
+    //
+    // K_first_ (3×90): precompute()에서 사전 계산한 최적 피드백 게인
+    //   = (H⁻¹ · Γᵀ · Q̄)의 첫 번째 블록 행 (첫 nu=3 행)
+    //   의미: "각 위치/속도 오차가 1단위일 때 최적으로 줘야 할 가속도"
+    //   Q/R 비율로 결정됨:
+    //     q_pos 크면 → K_first_ 스케일 커짐 → 위치 오차에 강하게 반응
+    //     r_acc 크면 → K_first_ 스케일 작아짐 → 입력 아끼며 부드럽게 반응
+    //
+    // [Receding Horizon 원칙]
+    //   최적화는 N스텝 전체(U* = [u₀*, u₁*, ..., u_{N-1}*])에 대해 수행하지만
+    //   실제로 드론에 적용하는 건 첫 번째 입력 u₀*만
+    //   다음 100Hz 주기에 새로운 상태로 다시 전체 최적화 → 실시간 반응성 보장
+    //
+    // [계산 비용]
+    //   행렬-벡터 곱: (3×90) × (90×1) = 270 MACs → 100Hz 실시간 가능
+    // ═══════════════════════════════════════════════════════════════
     const Eigen::VectorXd u0 = K_first_ * e0;
+    //                         └──게인──┘ └오차┘
 
-    // // feedforward 추가 (guidance의 예측 가속도)
-    // const double ax_cmd = u0(0) + ref.a_ref.x;
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 5. 가속도 명령 추출 + feedforward 미사용 (설계 결정)
+    //
+    // u0(0~2): MPC 피드백이 계산한 world frame 가속도 명령 [ax, ay, az]
+    //
+    // [왜 a_ref(feedforward)를 제거했나?]
+    //   PID에서 a_ref가 필요한 이유:
+    //     PID는 위치 오차 → 속도 명령 → 가속도 명령으로 간접 계산
+    //     guidance의 미래 가속도(a_ref)를 직접 받지 못하므로 feedforward로 보완
+    //
+    //   MPC에서 a_ref가 불필요한 이유:
+    //     MPC의 Xref에 이미 v_ref(목표 속도)가 포함되어 있음
+    //     K_first_가 속도 오차(e₀의 vx~vz 항)를 보고
+    //     "v_ref를 따라가려면 이만큼 가속해야 해"를 이미 암묵적으로 계산
+    //     여기에 a_ref까지 더하면 같은 가속 요구를 두 번 인가 → 이중 인가
+    //     실험 확인: a_ref 제거 후 비행시간이 24.25s로 PID 수준에 복귀
+    //
+    // [주석 처리된 이전 코드]
+    // const double ax_cmd = u0(0) + ref.a_ref.x;  ← 이중 인가 문제
     // const double ay_cmd = u0(1) + ref.a_ref.y;
     // const double az_cmd = u0(2) + ref.a_ref.z;
-
-    // MPC는 Xref에 이미 v_ref가 포함되어 있어 feedforward 역할을 함
-    // a_ref를 추가하면 이중 인가 문제 발생 → 제거
-    const double ax_cmd = u0(0);
+    // ═══════════════════════════════════════════════════════════════
+    const double ax_cmd = u0(0);  // MPC 피드백만 사용 (feedforward 없음)
     const double ay_cmd = u0(1);
     const double az_cmd = u0(2);
 
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 6. 자세 제어 inner loop으로 넘기기
+    //
+    // MPC outer loop의 역할: "world frame에서 어떤 가속도가 필요한가" 결정
+    // attitude_and_thrust inner loop의 역할:
+    //   1. tilt mapping:  ax/ay → 드론을 얼마나 기울일지 (roll, pitch 목표)
+    //   2. attitude PD:   목표 자세 따라가기 → moment 명령
+    //   3. thrust 계산:   az + 중력 보상 + tilt compensation → 추력 크기
+    //
+    // 반환: Input (thrust_body, moment_body) → simulation_node로 전달
+    // ═══════════════════════════════════════════════════════════════
     return attitude_and_thrust(s, ax_cmd, ay_cmd, az_cmd,
                                 ref.yaw_ref, drone_p_, gains_);
 }
