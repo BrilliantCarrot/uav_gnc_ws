@@ -275,11 +275,155 @@ def plot_comparison_grid(cases, save_dir):
     plt.savefig(save_path, dpi=200, bbox_inches='tight')
     print(f"[저장 완료] {save_path}")
 
+# ======================================================================
+# plot_ekf_error_grid()
+#
+# EKF 추정 성능 시각화 함수 — 4행 × 4열 그리드
+#
+# [개념]
+#   - sim CSV : 6-DOF 시뮬레이터의 실제 위치 (ground truth)
+#   - nav CSV : EKF가 추정한 위치 (sensor fusion 결과)
+#   - 오차    : nav - sim → EKF가 실제 위치를 얼마나 정확히 추정했는지
+#
+# [구성]
+#   행(Row): Case1~4 (4개 케이스)
+#   열(Col): X 오차 | Y 오차 | Z 오차 | 3D 궤적 비교 (sim vs nav)
+#
+# [각 열 내용]
+#   - X/Y/Z 오차: |nav - sim| 시계열 + RMSE 수평선
+#   - 3D 비교: ground truth(파란선) vs EKF 추정(주황선) 동시 표시
+#
+# [인자]
+#   cases    : 케이스 정보 딕셔너리 리스트
+#              { 'label', 'sim_csv', 'nav_csv', 'waypoints'(선택) }
+#   save_dir : 그래프 저장 폴더 경로
+# ======================================================================
+def plot_ekf_error_grid(cases, save_dir):
+ 
+    fig = plt.figure(figsize=(22, 18))
+    fig.suptitle('EKF Estimation Error Analysis\n(Case1: PID Clean | Case2: MPC Clean | Case3: PID Wind | Case4: MPC+I Wind)',
+                 fontsize=14, fontweight='bold', y=0.98)
+ 
+    col_titles = ['EKF Error X [m]', 'EKF Error Y [m]', 'EKF Error Z [m]', '3D: GT vs EKF']
+ 
+    for row_idx, case in enumerate(cases):
+ 
+        # sim(ground truth) / nav(EKF) CSV 둘 다 존재해야 처리 가능
+        if not os.path.exists(case['sim_csv']) or not os.path.exists(case['nav_csv']):
+            print(f"[SKIP] {case['label']} — sim 또는 nav CSV 없음")
+            continue
+ 
+        df_sim = pd.read_csv(case['sim_csv'])
+        df_nav = pd.read_csv(case['nav_csv'])
+ 
+        # ── 시간축 동기화 ─────────────────────────────────────────────
+        # sim/nav는 별도 노드에서 로깅되므로 타임스탬프가 미세하게 다를 수 있음
+        # 공통 시간 범위(min~max 겹치는 구간)로 잘라낸 뒤, 선형 보간으로 정렬함
+        t_sim = df_sim['t_sec'].values
+        t_nav = df_nav['t_sec'].values
+ 
+        # 두 시계열의 겹치는 시간 범위 계산
+        t_start = max(t_sim[0], t_nav[0])
+        t_end   = min(t_sim[-1], t_nav[-1])
+ 
+        # sim 기준 시간축으로 nav 데이터를 보간함 (선형 보간)
+        # → 두 CSV의 샘플링 시점이 달라도 같은 t에서 비교 가능해짐
+        mask = (t_sim >= t_start) & (t_sim <= t_end)
+        t_common = t_sim[mask]
+ 
+        # sim ground truth 위치 (공통 구간만)
+        gt_x = df_sim['x'].values[mask]
+        gt_y = df_sim['y'].values[mask]
+        gt_z = df_sim['z'].values[mask]
+ 
+        # nav EKF 추정 위치를 sim 시간축으로 선형 보간
+        ekf_x = np.interp(t_common, t_nav, df_nav['x'].values)
+        ekf_y = np.interp(t_common, t_nav, df_nav['y'].values)
+        ekf_z = np.interp(t_common, t_nav, df_nav['z'].values)
+ 
+        # EKF 추정 오차 계산 (절댓값)
+        err_x = np.abs(ekf_x - gt_x)
+        err_y = np.abs(ekf_y - gt_y)
+        err_z = np.abs(ekf_z - gt_z)
+ 
+        # 축별 RMSE 계산
+        rmse_x = np.sqrt(np.mean((ekf_x - gt_x)**2))
+        rmse_y = np.sqrt(np.mean((ekf_y - gt_y)**2))
+        rmse_z = np.sqrt(np.mean((ekf_z - gt_z)**2))
+ 
+        # 터미널 출력
+        print(f"===== EKF Error [{case['label'].replace(chr(10), ' ')}] =====")
+        print(f"  X RMSE: {rmse_x:.4f} m | Y RMSE: {rmse_y:.4f} m | Z RMSE: {rmse_z:.4f} m")
+ 
+        # ── 열 0: EKF X 오차 ───────────────────────────────────────────
+        ax0 = fig.add_subplot(4, 4, row_idx * 4 + 1)
+        ax0.plot(t_common, err_x, color='steelblue', linewidth=1.0, alpha=0.85)
+        ax0.axhline(rmse_x, color='black', linestyle='--', linewidth=1.2,
+                    label=f'RMSE={rmse_x:.3f}m')
+        ax0.set_ylabel(case['label'], fontsize=9, fontweight='bold')
+        ax0.legend(fontsize=8, loc='upper right')
+        ax0.grid(True, alpha=0.4)
+        ax0.set_ylim(bottom=0)
+        if row_idx == 0:
+            ax0.set_title(col_titles[0], fontsize=11, fontweight='bold')
+        if row_idx == 3:
+            ax0.set_xlabel('Time [s]', fontsize=9)
+ 
+        # ── 열 1: EKF Y 오차 ───────────────────────────────────────────
+        ax1 = fig.add_subplot(4, 4, row_idx * 4 + 2)
+        ax1.plot(t_common, err_y, color='steelblue', linewidth=1.0, alpha=0.85)
+        ax1.axhline(rmse_y, color='black', linestyle='--', linewidth=1.2,
+                    label=f'RMSE={rmse_y:.3f}m')
+        ax1.legend(fontsize=8, loc='upper right')
+        ax1.grid(True, alpha=0.4)
+        ax1.set_ylim(bottom=0)
+        if row_idx == 0:
+            ax1.set_title(col_titles[1], fontsize=11, fontweight='bold')
+        if row_idx == 3:
+            ax1.set_xlabel('Time [s]', fontsize=9)
+ 
+        # ── 열 2: EKF Z 오차 ───────────────────────────────────────────
+        ax2 = fig.add_subplot(4, 4, row_idx * 4 + 3)
+        ax2.plot(t_common, err_z, color='steelblue', linewidth=1.0, alpha=0.85)
+        ax2.axhline(rmse_z, color='black', linestyle='--', linewidth=1.2,
+                    label=f'RMSE={rmse_z:.3f}m')
+        ax2.legend(fontsize=8, loc='upper right')
+        ax2.grid(True, alpha=0.4)
+        ax2.set_ylim(bottom=0)
+        if row_idx == 0:
+            ax2.set_title(col_titles[2], fontsize=11, fontweight='bold')
+        if row_idx == 3:
+            ax2.set_xlabel('Time [s]', fontsize=9)
+ 
+        # ── 열 3: 3D 궤적 비교 (ground truth vs EKF 추정) ──────────────
+        ax3 = fig.add_subplot(4, 4, row_idx * 4 + 4, projection='3d')
+        # ground truth: 시뮬레이터 실제 위치 (파란선)
+        ax3.plot(gt_x, gt_y, gt_z, color='steelblue', linewidth=1.5, label='Ground Truth')
+        # EKF 추정: 필터 출력 위치 (주황선)
+        ax3.plot(ekf_x, ekf_y, ekf_z, color='red', linewidth=1.0,
+                 linestyle='--', alpha=0.85, label='EKF Est.')
+        ax3.set_xlabel('X [m]', fontsize=7)
+        ax3.set_ylabel('Y [m]', fontsize=7)
+        ax3.set_zlabel('Z [m]', fontsize=7)
+        ax3.tick_params(labelsize=7)
+        ax3.legend(fontsize=7, loc='upper left')
+        if row_idx == 0:
+            ax3.set_title(col_titles[3], fontsize=11, fontweight='bold')
+ 
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+ 
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    save_path = os.path.join(save_dir, 'ekf_error_grid.png')
+    plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    print(f"[저장 완료] {save_path}")
+
 if __name__ == '__main__':
     save_directory = '/home/lyj/uav_gnc_ws'
 
     # ── 기존: 케이스별 개별 그래프 ──────────────────────────────────────
     # guidance.yaml 웨이포인트 — eval_sim이 중간 kill될 때 사용
+    # MPC+I 4번 케이스에서 첫 웨이포인트 안찍혀서 이용
     WP = {
         'x': [0.0, 4.0, 6.0, 6.0, 4.0, 0.0, -2.0, -2.0, 0.0],
         'y': [0.0, 0.0, 2.0, 6.0, 8.0, 8.0,  6.0,  2.0, 0.0],
@@ -295,27 +439,33 @@ if __name__ == '__main__':
         {
             'label'  : 'Case1\nPID (Clean)',
             'sim_csv': '/home/lyj/uav_gnc_ws/case1_sim_tracking_eval.csv',
+            'nav_csv': '/home/lyj/uav_gnc_ws/case1_nav_tracking_eval.csv',
             'color'  : 'steelblue',
         },
         {
             'label'  : 'Case2\nMPC (Clean)',
             'sim_csv': '/home/lyj/uav_gnc_ws/case2_sim_tracking_eval.csv',
+            'nav_csv': '/home/lyj/uav_gnc_ws/case2_nav_tracking_eval.csv',
             'color'  : 'steelblue',
         },
         {
             'label'  : 'Case3\nPID (Wind)',
             'sim_csv': '/home/lyj/uav_gnc_ws/case3_sim_tracking_eval.csv',
+            'nav_csv': '/home/lyj/uav_gnc_ws/case3_nav_tracking_eval.csv',
             'color'  : 'steelblue',
         },
         {
             'label'  : 'Case4\nMPC+I (Wind)',
             # 최종 튜닝 결과(case4_2) 사용
             'sim_csv': '/home/lyj/uav_gnc_ws/case4_2_sim_tracking_eval.csv',
+            'nav_csv': '/home/lyj/uav_gnc_ws/case4_2_nav_tracking_eval.csv',
             'color'  : 'steelblue',
             'waypoints': WP,
         },
     ]
     plot_comparison_grid(cases, save_directory)
+    # ── EKF 추정 오차 그리드 ─────────────────────────────────────────────     
+    plot_ekf_error_grid(cases, save_directory)
 
     plt.show()
 

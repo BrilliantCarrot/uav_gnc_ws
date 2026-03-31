@@ -88,6 +88,21 @@ Under ideal (no-wind) conditions, Linear MPC and Cascaded PID perform comparably
 
 This behavior directly matches the finding in Foehn et al. (IROS 2021, arXiv:2108.13205). The architecturally correct solution is **MPCC** (Model Predictive Contouring Control) with arc-length parameterization.
 
+### EKF Estimation Error Analysis
+
+The 15-State Error-State EKF was evaluated independently by comparing
+the filter output against the simulator ground truth across all 4 cases.
+
+![EKF Estimation Error](docs/ekf_error_grid.png)
+
+Under ideal conditions (Cases 1–2), XY estimation error remains below 0.03 m,
+confirming stable sensor fusion. Z error shows a transient spike (~0.4 m)
+during the initial takeoff phase, then converges to near zero — this is
+expected behavior as the EKF requires several seconds to initialize altitude
+from GPS. Under wind + GPS noise (Cases 3–4), XY error increases RMSE 
+due to GPS measurement noise (σ = 0.5 m), while the filter maintains
+consistent tracking throughout the flight.
+
 ---
 
 ## Troubleshooting Log (Selected)
