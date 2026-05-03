@@ -205,9 +205,8 @@ uav_gnc_ws/
 
 ## Future Work
 
-- **MPCC** (Model Predictive Contouring Control): arc-length parameterization to resolve time-parameterization mismatch — the architecturally correct MPC solution
-- **Geometric Controller SE(3)**: nonlinear dynamics, suitable for aggressive maneuvers
-- **A\* path planning + LiDAR/SLAM**: obstacle avoidance in unknown environments
+- **UKF**: implemt UKF and comparison between UKF and EKF
+- **D\* path planning + LiDAR/SLAM**: obstacle avoidance in unknown environments
 - **MPC + RL**: reinforcement learning for adaptive Q/R matrix tuning
 
 ---

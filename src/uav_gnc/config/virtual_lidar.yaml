@@ -1,0 +1,21 @@
+virtual_lidar_node:
+  ros__parameters:
+    odom_topic: "/sim/odom"
+    output_topic: "/lidar/points"
+    frame_id: "world"
+
+    publish_rate_hz: 10.0
+    range_min_m: 0.5
+    range_max_m: 15.0
+
+    horizontal_fov_deg: 360.0
+    vertical_fov_deg: 30.0
+    horizontal_samples: 180
+    vertical_samples: 8
+
+    obstacle_base_z: 0.0
+    obstacle_height: 3.0
+
+    obstacle_x: [3.0, 0.0, -1.5]
+    obstacle_y: [1.0, 5.0, 3.0]
+    obstacle_r: [1.0, 1.0, 0.8]

@@ -1,0 +1,22 @@
+occupancy_projection_node:
+  ros__parameters:
+    input_cloud_topic: "/lidar/points_filtered"
+    input_odom_topic: "/nav/odom"
+
+    output_grid_topic: "/planning/occupancy_updates"
+    output_marker_topic: "/planning/occupancy_markers"
+
+    grid_width_m: 30.0
+    grid_height_m: 30.0
+    grid_resolution: 0.5
+    grid_origin_x: -10.0
+    grid_origin_y: -5.0
+
+    slice_mode: "relative_to_vehicle"
+    fly_altitude: 2.0
+
+    slice_z_min_rel: -1.0
+    slice_z_max_rel: 1.0
+
+    min_points_per_cell: 1
+    marker_height: 2.0

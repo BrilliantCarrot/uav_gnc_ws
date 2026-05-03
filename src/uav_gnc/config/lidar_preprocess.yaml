@@ -1,0 +1,11 @@
+lidar_preprocess_node:
+  ros__parameters:
+    input_topic: "/lidar/points"
+    output_topic: "/lidar/points_filtered"
+
+    voxel_leaf_size: 0.15
+    crop_z_min: 0.0
+    crop_z_max: 5.0
+
+    range_min_m: 0.5
+    range_max_m: 15.0

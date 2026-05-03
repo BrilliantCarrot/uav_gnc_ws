@@ -28,7 +28,7 @@ control_node:
     max_vz_cmd: 5.0   # 기존 2.0 -> 5.0
     max_az_cmd: 10.0  # 기존 6.0 -> 10.0
     # ===== Linear MPC 제어기 설정 =====
-    use_mpc: true
+    use_mpc: false
     mpc_N: 15
     mpc_q_pos_xy: 50.0
     mpc_q_pos_z:  200.0

@@ -3,3 +3,9 @@ navigation_node:
     imu_topic: "/sim/imu"
     gps_topic: "/sim/gps/pos"
     out_topic: "/nav/odom"
+    # ── 필터 선택 ────────────────────────────────────────────────
+    # "ekf" : Error-State EKF (야코비안 기반 선형화, 기존 구현)
+    # "ukf" : Unscented KF   (시그마 포인트 기반, 비선형 전파)
+    # 두 필터는 노이즈 파라미터(Q, R)를 동일하게 공유하므로
+    # 이 값 하나만 바꿔서 성능 비교 실험 가능
+    filter_type: "ekf"

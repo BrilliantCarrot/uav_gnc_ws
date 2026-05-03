@@ -10,6 +10,8 @@
 #include "uav_gnc/trajectory.h" // 궤적 생성기 헤더
 #include <std_msgs/msg/float64_multi_array.hpp> // MPC trajectory preview용
 
+#include "nav_msgs/msg/path.hpp"
+
 using namespace std::chrono_literals;
 
 // ======================================================================
@@ -72,6 +74,16 @@ public:
     preview_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
       "/guidance/trajectory_preview", 10);
 
+
+    // use_planner가 true이면 /planning/path 구독하여 동적 웨이포인트 사용
+    use_planner_ = this->declare_parameter<bool>("use_planner", true);
+    if (use_planner_) {
+        path_sub_ = this->create_subscription<nav_msgs::msg::Path>(
+            "/planning/path", 10,
+            std::bind(&GuidanceNode::plannerPathCallback, this, std::placeholders::_1));
+        RCLCPP_INFO(this->get_logger(), "[Guidance] D* Lite 경로 계획기 연동 활성화");
+    }      
+
     // rate_hz_(예: 20Hz = 0.05초)마다 onTimer 함수를 실행시키는 타이머
     const auto period = std::chrono::duration<double>(1.0 / std::max(1.0, rate_hz_));
     timer_ = this->create_wall_timer(
@@ -87,6 +99,58 @@ private:
     geometry_msgs::msg::Quaternion q;
     q.w = std::cos(yaw * 0.5); q.x = 0.0; q.y = 0.0; q.z = std::sin(yaw * 0.5);
     return q;
+  }
+
+  bool isPlannerPathMeaningfullyChanged(const nav_msgs::msg::Path::SharedPtr msg) {
+    if (msg->poses.empty()) return false;
+
+    if (last_path_x_.size() != msg->poses.size()) return true;
+
+    double max_shift = 0.0;
+    for (size_t i = 0; i < msg->poses.size(); ++i) {
+        double dx = msg->poses[i].pose.position.x - last_path_x_[i];
+        double dy = msg->poses[i].pose.position.y - last_path_y_[i];
+        max_shift = std::max(max_shift, std::hypot(dx, dy));
+    }
+
+    return max_shift > 0.5;  // 0.5m 이상 바뀐 경우만 새 경로로 인정함
+  }
+
+  void plannerPathCallback(const nav_msgs::msg::Path::SharedPtr msg) {
+      if (msg->poses.size() < 2) return;
+
+      // 경로 형상이 실질적으로 안 바뀌었으면 재생성 안 함
+      if (!isPlannerPathMeaningfullyChanged(msg) && !wp_x_.empty()) {
+          return;
+      }
+
+      double new_gx = msg->poses.back().pose.position.x;
+      double new_gy = msg->poses.back().pose.position.y;
+
+      planner_goal_x_ = new_gx;
+      planner_goal_y_ = new_gy;
+
+      wp_x_.clear();
+      wp_y_.clear();
+      wp_z_.clear();
+      last_path_x_.clear();
+      last_path_y_.clear();
+
+      for (const auto& ps : msg->poses) {
+          wp_x_.push_back(ps.pose.position.x);
+          wp_y_.push_back(ps.pose.position.y);
+          wp_z_.push_back(ps.pose.position.z);
+
+          last_path_x_.push_back(ps.pose.position.x);
+          last_path_y_.push_back(ps.pose.position.y);
+      }
+
+      if (have_odom_ && guidance_mode_ == "multi_snap") {
+          generateMultiSegmentTrajectory();
+          RCLCPP_INFO_THROTTLE(
+              this->get_logger(), *this->get_clock(), 1000,
+              "[Guidance] planner path 변경 감지, trajectory 재생성 (%zu wp)", wp_x_.size());
+      }
   }
 
   // ---------------------------------------------------
@@ -177,12 +241,14 @@ private:
         // 3차원 공간에서의 거리로 구간별 이동 시간을 구함
         double dist = std::hypot(dx, dy, dz); 
         
-        if (dist < 0.1) continue; // 웨이포인트가 너무 촘촘하면 무시 (오류 방지)
+        if (i == 0 && dist < 1.0) continue;   // 첫 점이 현재 위치와 너무 가까우면 버림
+        if (dist < 0.3) continue;             // 일반 중복점 제거
 
         full_wp_x.push_back(wp_x_[i]);
         full_wp_y.push_back(wp_y_[i]);
         full_wp_z.push_back(wp_z_[i]); // Z축 웨이포인트 추가함
-        times.push_back(dist / avg_speed_); // 사용자가 설정한 평균 속도를 기준으로 각 구간별 시간 할당
+
+        times.push_back(std::max(0.8, dist / avg_speed_)); // 사용자가 설정한 평균 속도를 기준으로 각 구간별 시간 할당
     }
 
     if (times.empty()) return;
@@ -550,6 +616,13 @@ private:
   size_t wp_index_{0};
   
   std::vector<double> wp_x_, wp_y_, wp_z_; // Z축 웨이포인트 벡터
+
+  std::vector<double> last_path_x_;
+  std::vector<double> last_path_y_;
+
+  bool use_planner_{false};
+  double planner_goal_x_{1e9}, planner_goal_y_{1e9};
+  rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;  
 
   // 궤적 생성기 인스턴스들 (Z축은 multi_snap에서 제외되어 사용 안 함)
   MinJerkTrajectory jerk_x_, jerk_y_, jerk_z_;

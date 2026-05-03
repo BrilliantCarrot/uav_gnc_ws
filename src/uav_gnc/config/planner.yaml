@@ -1,0 +1,38 @@
+path_planner_node:
+  ros__parameters:
+    # ── 2.5D 격자 파라미터 ──────────────────────────────────────
+    # 격자 전체 크기 (m)
+    grid_width_m:    30.0
+    grid_height_m:   30.0
+    # 셀 하나의 실제 크기 (m/cell) — 작을수록 정밀하지만 계산량 증가
+    grid_resolution:  0.5
+    # 격자 원점의 월드 좌표 (격자의 (0,0)셀 좌표)
+    # 기존 웨이포인트가 x:[-2~6], y:[0~8] 범위이므로 여유 있게 설정
+    grid_origin_x:  -10.0
+    grid_origin_y:   -5.0
+
+    # ── 비행 고도 (2.5D: Z 고정) ─────────────────────────────────
+    fly_altitude: 2.0
+
+    # ── 목표점 (월드 좌표) ───────────────────────────────────────
+    # 기존 guidance.yaml의 마지막 웨이포인트와 동일하게 설정
+    goal_x: -5.0
+    goal_y: 7.0
+
+    # ── 재계획 주기 ──────────────────────────────────────────────
+    # 2Hz = 0.5초마다 D* Lite plan() 호출
+    # 빠른 재계획이 필요하면 올려도 됨 (D* Lite는 증분이라 계산 가벼움)
+    replan_rate_hz: 2.5
+
+    # ── 정적 장애물 (원형, 월드 좌표 + 반경) ─────────────────────
+    # 기존 웨이포인트 경로 중간에 배치하여 우회 경로 생성 확인
+    # obstacle_x[i], obstacle_y[i]가 중심, obstacle_r[i]이 반경(m)
+    obstacle_x: [3.0,  0.0, -1.5]
+    obstacle_y: [1.0,  5.0,  3.0]
+    obstacle_r: [1.0,  1.0,  0.8]
+
+    # ── 동적 occupancy grid 연동 ───────────────────────────────
+    use_dynamic_occupancy: true
+    replan_on_map_change: true
+    replan_on_start_move_m: 0.5
+    occupancy_threshold: 50
