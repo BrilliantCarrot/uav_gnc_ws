@@ -345,9 +345,15 @@ uav_gnc_ws/
 ## References
 
 1. Foehn et al., "Time-Optimal Planning for Quadrotor Waypoint Flight," *IROS 2021* — [arXiv:2108.13205](https://arxiv.org/abs/2108.13205)
-2. MathWorks, "Trajectory Optimization and Control of Flying Robot Using Nonlinear MPC" — MATLAB Documentation
-3. Hassani et al., "Performance Evaluation of Control Strategies for Autonomous Quadrotors," *Complexity* (2024)
-4. Mellinger & Kumar, "Minimum Snap Trajectory Generation and Control for Quadrotors," *ICRA 2011*
+2. Mellinger and Kumar, "Minimum Snap Trajectory Generation and Control for Quadrotors," *ICRA 2011*
+3. MathWorks, "Trajectory Optimization and Control of Flying Robot Using Nonlinear MPC" — MATLAB Documentation
+4. Hassani et al., "Performance Evaluation of Control Strategies for Autonomous Quadrotors," *Complexity* (2024)
+5. Koenig and Likhachev, "D* Lite," *AAAI Conference on Artificial Intelligence*, 2002  
+6. Rusu and Cousins, "3D is here: Point Cloud Library (PCL)," *IEEE International Conference on Robotics and Automation*, 2011  
+7. Shan et al., "LIO-SAM: Tightly-coupled Lidar Inertial Odometry via Smoothing and Mapping," *IROS 2020*  
+8. Xu and Zhang, "FAST-LIO: A Fast, Robust LiDAR-inertial Odometry Package by Tightly-Coupled Iterated Kalman Filter," *IEEE Robotics and Automation Letters*, 2021  
+9. ROS2 Documentation, "Understanding ROS2 Topics, Launch Files, and rqt_graph"  
+10. Point Cloud Library Documentation, "Filtering, VoxelGrid, and PointCloud Processing Tutorials"  
 
 ---
 
