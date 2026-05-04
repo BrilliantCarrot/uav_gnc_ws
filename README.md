@@ -26,11 +26,15 @@ This project implements a complete UAV GNC (Guidance, Navigation, and Control) p
 
 | Node | Responsibility | Rate |
 |------|---------------|------|
-| `simulation_node` | 6-DOF RK4 integrator, IMU/GPS noise injection, wind disturbance | 100 Hz |
-| `navigation_node` | 15-State Error-State EKF (IMU + GPS sensor fusion) | 100 Hz predict / 10 Hz update |
-| `guidance_node` | Multi-Segment Minimum Snap trajectory, Reference Preview for MPC | 20 Hz |
-| `control_node` | Cascaded PID or Linear MPC outer loop + attitude PD inner loop | 100 Hz |
-| `tracking_eval_node` | Real-time 3D Cross-Track Error, CSV logging | 20 Hz |
+| `simulation_node` | 6-DOF UAV dynamics simulation (RK4), generates ground truth `/sim/odom`, IMU, and GPS measurements with noise and disturbance | 100 Hz |
+| `virtual_lidar_node` | Generates synthetic 3D LiDAR point cloud from simulated UAV pose and obstacle environment | ~10 Hz |
+| `lidar_preprocess_node` | Filters LiDAR point cloud (range, height, voxel downsampling) and publishes `/lidar/points_filtered` | ~10 Hz |
+| `lidar_pose_correction_node` | Generates LiDAR-derived pose correction (pseudo-measurement) when sufficient points are available for GPS-denied navigation | ~10 Hz |
+| `occupancy_projection_node` | Projects 3D LiDAR points into a 2.5D occupancy grid and publishes obstacle updates for planning | ~10 Hz |
+| `path_planner_node` | D* Lite incremental path planner using occupancy grid and current `/nav/odom`, outputs obstacle-aware path `/planning/path` | ~5–10 Hz |
+| `navigation_node` | EKF / UKF-based state estimation (IMU prediction + GPS or LiDAR correction), outputs `/nav/odom` | 100 Hz predict / 10 Hz update |
+| `guidance_node` | Converts planner path into smooth trajectory using multi-segment minimum-snap and generates reference setpoints | 20 Hz |
+| `control_node` | Executes cascaded PID or Linear MPC for trajectory tracking using `/nav/odom` and guidance setpoints | 100 Hz |
 
 ---
 
