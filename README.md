@@ -21,7 +21,7 @@ This project implements a complete UAV GNC (Guidance, Navigation, and Control) p
 ## System Architecture
 
 
-<img width="2931" height="587" alt="Image" src="https://github.com/user-attachments/assets/aa5ba3c1-1e75-44e6-8b9a-891a478f7f41" />
+![rqt_graph nodes](docs/rosgraph_2.png)
 
 
 | Node | Responsibility | Rate |
