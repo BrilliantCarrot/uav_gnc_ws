@@ -1,0 +1,6 @@
+planning_path_logger_node:
+  ros__parameters:
+    input_path_topic: "/planning/path"
+    csv_path: "/home/lyj/uav_gnc_ws/planning_path_log.csv"
+    append: false
+    min_save_period_sec: 0.0

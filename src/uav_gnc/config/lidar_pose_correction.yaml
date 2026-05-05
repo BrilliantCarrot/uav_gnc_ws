@@ -1,0 +1,15 @@
+lidar_pose_correction_node:
+  ros__parameters:
+    gt_odom_topic: "/sim/odom"
+    input_cloud_topic: "/lidar/points_filtered"
+    output_odom_topic: "/lidar/pose_odom"
+    frame_id: "world"
+    child_frame_id: "lidar_pose"
+    publish_rate_hz: 5.0
+    pos_noise_std_xy: 0.15
+    pos_noise_std_z: 0.20
+    yaw_noise_std_deg: 3.0
+    min_points_for_update: 20
+    max_cloud_age_sec: 0.5
+    dropout_rate: 0.0
+    random_seed: 7

@@ -44,6 +44,7 @@ public:
 
     // 보정 단계: GPS 위치로 상태 보정 (H가 선형이므로 EKF와 수식 동일)
     void update_gps(const Vector3d& meas_pos);
+    void update_lidar_pose(const Vector3d& meas_pos, double meas_yaw);
 
     // Getter — EKF와 동일한 인터페이스 (navigation_node가 구분 없이 호출 가능)
     Vector3d          getPosition()   const { return x_.segment<3>(0); }
@@ -80,6 +81,7 @@ private:
     // ── 노이즈 행렬 ───────────────────────────────────────────────
     MatrixXd Q_;      // 프로세스 노이즈 공분산 (15×15)
     MatrixXd R_gps_;  // GPS 측정 노이즈 공분산 (3×3)
+    MatrixXd R_lidar_pose_;
 
     const double g_ = 9.80665;
 

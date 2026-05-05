@@ -21,6 +21,7 @@ public:
     // 보정 단계 (GPS Data): GPS 위치 데이터를 측정치(z)로 사용하여 오차를 수정
     // meas_pos: GPS 위치 (x, y, z)
     void update_gps(const Vector3d& meas_pos);
+    void update_lidar_pose(const Vector3d& meas_pos, double meas_yaw);
     // Getter
     Vector3d getPosition() const { return x_.segment<3>(0); }
     Vector3d getVelocity() const { return x_.segment<3>(3); }
@@ -48,6 +49,7 @@ private:
     // 파라미터: 노이즈 공분산
     MatrixXd Q_; // Process Noise Covariance 시스템 노이즈 행렬
     MatrixXd R_gps_; // Measurement Noise Covariance (GPS) 측정 노이즈 행렬
+    MatrixXd R_lidar_pose_;
     // 상수
     const double g_ = 9.80665;
 };

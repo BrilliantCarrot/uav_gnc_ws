@@ -1,3 +1,22 @@
+// ============================================================
+// ekf.cpp — Error-State EKF 구현 파일
+// ============================================================
+// [이 파일의 역할]
+//   navigation_node에서 사용하는 EKF 필터의 실제 수식 구현부임.
+//   IMU prediction과 3D position measurement update를 수행함.
+//
+// [Week 8과의 연결]
+//   Week 8에서는 GPS-denied 실험을 위해 LiDAR-derived pose correction을 만들었고,
+//   navigation_node에서 그 LiDAR pose의 position 성분을 update_gps(meas_pos)에 넣어 사용함.
+//   따라서 함수 이름은 update_gps()지만, 수학적으로는 "3D 위치 측정값으로 상태를 보정하는 update"임.
+//   즉 GPS 위치든 LiDAR pose position이든, z = [x, y, z] 형태라면 같은 update 구조를 재사용할 수 있음.
+//
+// [중요 개념]
+//   - Prediction: IMU 가속도/각속도를 적분해서 다음 상태를 예측함.
+//   - Update: GPS/LiDAR 같은 외부 위치 측정값으로 누적된 IMU drift를 보정함.
+//   - Error-State EKF: 실제 자세는 quaternion q_로 따로 유지하고,
+//     필터 상태에는 작은 자세 오차 dtheta만 넣어 안정적으로 보정하는 방식임.
+// ============================================================
 #include "uav_gnc/ekf.h"
 
 // Error-State EKF (ES-EKF)의 핵심: 모든 상태를 직접 수정하기보다, 오차 dx를 먼저 계산하고 그 오차를 명목 상태(Nominal State)에 반영하는 방식

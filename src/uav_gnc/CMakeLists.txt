@@ -90,10 +90,10 @@ add_executable(px4_bridge_node src/px4_bridge_node.cpp)
 add_executable(px4_odom_converter src/px4_odom_converter.cpp)
 add_executable(path_planner_node src/planning/path_planner_node.cpp)
 add_executable(virtual_lidar_node src/perception/virtual_lidar_node.cpp)
-
-# 새로 추가하는 perception 노드
 add_executable(lidar_preprocess_node src/perception/lidar_preprocess_node.cpp)
+add_executable(lidar_pose_correction_node src/perception/lidar_pose_correction_node.cpp)
 add_executable(occupancy_projection_node src/perception/occupancy_projection_node.cpp)
+add_executable(planning_path_logger_node src/evaluation/planning_path_logger_node.cpp)
 
 # 노드 링크
 target_link_libraries(simulation_node uav_gnc_core)
@@ -146,7 +146,9 @@ ament_target_dependencies(path_planner_node
 ament_target_dependencies(lidar_preprocess_node
   rclcpp sensor_msgs pcl_conversions
 )
-
+ament_target_dependencies(lidar_pose_correction_node
+  rclcpp nav_msgs sensor_msgs
+)
 ament_target_dependencies(occupancy_projection_node
   rclcpp sensor_msgs nav_msgs visualization_msgs pcl_conversions
 )
@@ -154,6 +156,8 @@ ament_target_dependencies(occupancy_projection_node
 ament_target_dependencies(virtual_lidar_node
   rclcpp nav_msgs sensor_msgs
 )
+ament_target_dependencies(planning_path_logger_node
+  rclcpp nav_msgs)
 
 # 설치(install) 규칙
 install(TARGETS
@@ -171,8 +175,10 @@ install(TARGETS
   px4_odom_converter
   path_planner_node
   lidar_preprocess_node
+  lidar_pose_correction_node
   occupancy_projection_node
   virtual_lidar_node
+  planning_path_logger_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

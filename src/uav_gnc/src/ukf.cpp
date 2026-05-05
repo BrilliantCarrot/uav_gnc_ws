@@ -1,5 +1,21 @@
 #include "uav_gnc/ukf.h"
 
+#include <cmath>
+
+namespace {
+double wrapAngle(double angle) {
+    while (angle > M_PI) angle -= 2.0 * M_PI;
+    while (angle < -M_PI) angle += 2.0 * M_PI;
+    return angle;
+}
+
+double yawFromQuaternion(const Eigen::Quaterniond& q) {
+    const double siny_cosp = 2.0 * (q.w() * q.z() + q.x() * q.y());
+    const double cosy_cosp = 1.0 - 2.0 * (q.y() * q.y() + q.z() * q.z());
+    return std::atan2(siny_cosp, cosy_cosp);
+}
+}
+
 // ============================================================
 // UKF (Unscented Kalman Filter) 구현
 //
@@ -56,6 +72,12 @@ UKF::UKF() {
 
     // GPS 측정 노이즈 R (EKF와 동일, 비교 실험 공정성)
     R_gps_ = MatrixXd::Identity(3, 3) * 30.0;
+    R_lidar_pose_ = MatrixXd::Zero(4, 4);
+    R_lidar_pose_(0, 0) = 0.15 * 0.15;
+    R_lidar_pose_(1, 1) = 0.15 * 0.15;
+    R_lidar_pose_(2, 2) = 0.20 * 0.20;
+    const double yaw_std_rad = 3.0 * M_PI / 180.0;
+    R_lidar_pose_(3, 3) = yaw_std_rad * yaw_std_rad;
 }
 
 UKF::~UKF() {}
@@ -254,6 +276,39 @@ void UKF::update_gps(const Vector3d& meas_pos) {
     q_.normalize();
 
     // 공분산 업데이트: P = (I - K H) P
+    const MatrixXd I = MatrixXd::Identity(15, 15);
+    P_ = (I - K * H) * P_;
+}
+
+void UKF::update_lidar_pose(const Vector3d& meas_pos, double meas_yaw) {
+    MatrixXd H = MatrixXd::Zero(4, 15);
+    H.block<3, 3>(0, 0) = Matrix3d::Identity();
+    H(3, 8) = 1.0;
+
+    MatrixXd PHt = P_ * H.transpose();
+    MatrixXd S = H * PHt + R_lidar_pose_;
+    MatrixXd K = PHt * S.inverse();
+
+    Eigen::Vector4d y;
+    y.segment<3>(0) = meas_pos - x_.segment<3>(0);
+    y(3) = wrapAngle(meas_yaw - yawFromQuaternion(q_));
+
+    VectorXd dx = K * y;
+
+    x_.segment<3>(0) += dx.segment<3>(0);
+    x_.segment<3>(3) += dx.segment<3>(3);
+    x_.segment<3>(9) += dx.segment<3>(9);
+    x_.segment<3>(12) += dx.segment<3>(12);
+
+    const Vector3d dtheta = dx.segment<3>(6);
+    Eigen::Quaterniond dq;
+    dq.w() = 1.0;
+    dq.vec() = 0.5 * dtheta;
+    q_ = q_ * dq;
+    q_.normalize();
+
+    x_.segment<3>(6).setZero();
+
     const MatrixXd I = MatrixXd::Identity(15, 15);
     P_ = (I - K * H) * P_;
 }

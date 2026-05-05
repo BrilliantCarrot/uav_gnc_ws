@@ -9,3 +9,8 @@ navigation_node:
     # 두 필터는 노이즈 파라미터(Q, R)를 동일하게 공유하므로
     # 이 값 하나만 바꿔서 성능 비교 실험 가능
     filter_type: "ekf"
+    use_gps_update: true
+    use_lidar_update: false
+    use_lidar_init_only: false
+    lidar_pose_topic: /lidar/pose_odom
+    lidar_reject_threshold_m: 10.0
