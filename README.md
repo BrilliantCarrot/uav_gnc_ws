@@ -21,7 +21,7 @@ This project implements a complete UAV GNC (Guidance, Navigation, and Control) p
 ## System Architecture
 
 
-![rqt_graph nodes](docs/rosgraph_2.png)
+![rqt_graph nodes](images/rosgraph_2.png)
 
 
 | Node | Responsibility | Rate |
@@ -113,7 +113,7 @@ This project implements a complete UAV GNC (Guidance, Navigation, and Control) p
 
 **Robustness:** PID degraded by ×1.21 under wind; MPC+I degraded by ×2.29.
 
-![Performance Comparison](docs/comparison_grid.png)
+![Performance Comparison](images/comparison_grid.png)
 
 > Trajectory: 9-waypoint heptagon with 3D altitude variation (Z: 1.0 ~ 2.0 m),  
 > avg_speed = 1.5 m/s, sim/nav evaluated separately (EKF + GPS 0.5 m noise)
@@ -131,15 +131,15 @@ This experiment evaluates whether LiDAR-derived pose correction can stabilize UA
 | LiDAR-aided UKF | UKF | OFF | ON | OFF | GPS-denied UKF with LiDAR pose correction |
 | LiDAR-init + IMU-only EKF | EKF | OFF | OFF | ON | Initial LiDAR pose only, then IMU prediction only |
 
-![XY and Z Trajectory](docs/fig1_xy_z_trajectory.png)
+![XY and Z Trajectory](images/fig1_xy_z_trajectory.png)
 
 The XY trajectory plot shows that the D* Lite planner generates obstacle-avoiding keypoints instead of a direct straight-line path to the goal. The simulated UAV trajectory and the navigation-estimated trajectory follow the planned route while avoiding the circular obstacle footprints. In the Z trajectory plot, the GPS-aided and LiDAR-aided cases remain bounded around the target flight altitude, while the LiDAR-initialized IMU-only case shows severe altitude drift due to the absence of external position correction.
 
-![3D Trajectory and CTE](docs/fig2_3d_trajectory_and_cte.png)
+![3D Trajectory and CTE](images/fig2_3d_trajectory_and_cte.png)
 
 The 3D trajectory plot visualizes the obstacle cylinders, D* Lite keypoints, simulator ground truth, and navigation estimate in the same frame. The GPS EKF baseline, LiDAR-aided EKF, and LiDAR-aided UKF complete the obstacle-avoidance mission, while the IMU-only case diverges vertically and fails to complete the mission. The axis-wise CTE plots show that most of the IMU-only failure comes from the Z-axis error, confirming that external correction is essential for stable inertial navigation.
 
-![Localization Error](docs/fig3_localization_error.png)
+![Localization Error](images/fig3_localization_error.png)
 
 The localization error is computed as the difference between `/nav/odom` and the simulator ground truth `/sim/odom` after time synchronization. The GPS EKF baseline maintains the smallest overall localization error under normal GPS-aided conditions. When GPS is disabled, both LiDAR-aided EKF and UKF keep the localization error bounded by using LiDAR-derived pose correction. In contrast, the LiDAR-init + IMU-only case accumulates large vertical drift, demonstrating why continuous external correction is required in GPS-denied navigation.
 
@@ -167,7 +167,7 @@ This behavior directly matches the finding in Foehn et al. (IROS 2021, arXiv:210
 The 15-State Error-State EKF was evaluated independently by comparing
 the filter output against the simulator ground truth across all 4 cases.
 
-![EKF Estimation Error](docs/ekf_error_grid.png)
+![EKF Estimation Error](images/ekf_error_grid.png)
 
 Under ideal conditions (Cases 1–2), XY estimation error remains below 0.03 m,
 confirming stable sensor fusion. Z error shows a transient spike (~0.4 m)

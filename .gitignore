@@ -25,6 +25,8 @@ bin/
 obj/
 .vs/
 .vscode/
+.agents/
+.codex
 .idea/
 *.user
 *.suo

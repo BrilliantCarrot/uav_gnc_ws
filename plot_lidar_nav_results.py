@@ -75,12 +75,47 @@ plot_lidar_nav_results.py
 import argparse
 import glob
 import os
+import site
+import sys
+import types
 from pathlib import Path
+
+
+def prefer_user_mpl_toolkits():
+    """Use pip's mpl_toolkits when a system package would shadow it."""
+    candidates = []
+    try:
+        candidates.append(Path(site.getusersitepackages()) / "mpl_toolkits")
+    except Exception:
+        pass
+
+    for base in site.getsitepackages():
+        candidates.append(Path(base) / "mpl_toolkits")
+
+    for path in candidates:
+        if (path / "mplot3d" / "axes3d.py").exists():
+            package = types.ModuleType("mpl_toolkits")
+            package.__path__ = [str(path)]
+            package.__package__ = "mpl_toolkits"
+            sys.modules["mpl_toolkits"] = package
+            return path
+    return None
+
+
+PREFERRED_MPL_TOOLKITS_PATH = prefer_user_mpl_toolkits()
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
+
+try:
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+    MATPLOTLIB_3D_AVAILABLE = True
+    MATPLOTLIB_3D_ERROR = None
+except Exception as exc:
+    MATPLOTLIB_3D_AVAILABLE = False
+    MATPLOTLIB_3D_ERROR = exc
 
 try:
     import yaml
@@ -98,7 +133,7 @@ CASES = [
         "lidar_init_only": "OFF",
         "nav_candidates": ["nav_gps_ekf.csv"],
         "sim_candidates": ["sim_gps_ekf.csv"],
-        "path_candidates": ["planning_path_gps_ekf.csv"],
+        "path_candidates": ["planning_path_gps_ekf.csv", "planning_path_log.csv"],
         "note": "IMU + GPS correction baseline",
     },
     {
@@ -110,7 +145,7 @@ CASES = [
         "lidar_init_only": "OFF",
         "nav_candidates": ["nav_lidar_aided_ekf.csv"],
         "sim_candidates": ["sim_lidar_aided_ekf.csv"],
-        "path_candidates": ["planning_path_lidar_aided_ekf.csv"],
+        "path_candidates": ["planning_path_lidar_aided_ekf.csv", "planning_path_log.csv"],
         "note": "GPS-denied, LiDAR pose correction fused with EKF",
     },
     {
@@ -122,7 +157,7 @@ CASES = [
         "lidar_init_only": "OFF",
         "nav_candidates": ["nav_lidar_aided_ukf.csv"],
         "sim_candidates": ["sim_lidar_aided_ukf.csv"],
-        "path_candidates": ["planning_path_lidar_aided_ukf.csv"],
+        "path_candidates": ["planning_path_lidar_aided_ukf.csv", "planning_path_log.csv"],
         "note": "GPS-denied, LiDAR pose correction fused with UKF",
     },
     {
@@ -137,7 +172,7 @@ CASES = [
             "nav_lidar_init_imu_only_ekf_failed..csv",
         ],
         "sim_candidates": ["sim_lidar_init_imu_only_ekf_failed.csv"],
-        "path_candidates": ["planning_path_lidar_init_imu_only_ekf_failed.csv"],
+        "path_candidates": ["planning_path_lidar_init_imu_only_ekf_failed.csv", "planning_path_log.csv"],
         "note": "Initial pose only, then IMU prediction only",
     },
 ]
@@ -450,7 +485,7 @@ def plot_planned_path_3d(ax, case):
 
 def plot_figure1_trajectory_xy_z(cases, output_dir: Path, obstacles):
     fig, axes = plt.subplots(len(cases), 2, figsize=(16, 4.0 * len(cases)))
-    fig.suptitle("Week 8 UAV Navigation Result - XY and Z Trajectory", fontsize=15, fontweight="bold")
+    fig.suptitle("UAV Navigation Result - XY and Z Trajectory", fontsize=15, fontweight="bold")
 
     for row, case in enumerate(cases):
         df_sim = case["df_sim"]
@@ -495,7 +530,12 @@ def plot_figure1_trajectory_xy_z(cases, output_dir: Path, obstacles):
 
 def plot_figure2_3d_and_cte(cases, output_dir: Path, obstacles):
     fig = plt.figure(figsize=(18, 4.2 * len(cases)))
-    fig.suptitle("Week 8 UAV Navigation Result - 3D Trajectory and Axis-wise CTE", fontsize=15, fontweight="bold")
+    if MATPLOTLIB_3D_AVAILABLE:
+        fig.suptitle("UAV Navigation Result - 3D Trajectory and Axis-wise CTE", fontsize=15, fontweight="bold")
+    else:
+        fig.suptitle("UAV Navigation Result - XY Trajectory and Axis-wise CTE", fontsize=15, fontweight="bold")
+        print(f"[경고] Matplotlib 3D projection 사용 불가: {MATPLOTLIB_3D_ERROR}")
+        print("[경고] fig2 왼쪽 패널은 3D 대신 2D XY trajectory로 저장합니다.")
 
     for row, case in enumerate(cases):
         df_sim = case["df_sim"]
@@ -505,31 +545,49 @@ def plot_figure2_3d_and_cte(cases, output_dir: Path, obstacles):
         nav_x, nav_y, nav_z = get_xyz(df_nav)
         start, goal = get_goal_and_start(case, obstacles)
 
-        ax3d = fig.add_subplot(len(cases), 2, row * 2 + 1, projection="3d")
+        if MATPLOTLIB_3D_AVAILABLE:
+            ax3d = fig.add_subplot(len(cases), 2, row * 2 + 1, projection="3d")
+        else:
+            ax3d = fig.add_subplot(len(cases), 2, row * 2 + 1)
         ax_cte = fig.add_subplot(len(cases), 2, row * 2 + 2)
 
-        ax3d.plot(sim_x, sim_y, sim_z, label="Sim / Ground Truth", linewidth=1.6)
-        ax3d.plot(nav_x, nav_y, nav_z, "--", label="Nav Estimate", linewidth=1.2)
-        plotted_path = plot_planned_path_3d(ax3d, case)
-        add_obstacles_3d(ax3d, obstacles)
-        ax3d.scatter([start[0]], [start[1]], [start[2]], marker="s", s=30, label="Start")
-        ax3d.scatter([goal[0]], [goal[1]], [goal[2]], marker="*", s=70, label="Goal")
-        ax3d.set_title(f"{case['label']} - 3D Trajectory")
-        ax3d.set_xlabel("X [m]", fontsize=8)
-        ax3d.set_ylabel("Y [m]", fontsize=8)
-        ax3d.set_zlabel("Z [m]", fontsize=8)
-        ax3d.tick_params(labelsize=7)
-        ax3d.legend(fontsize=7, loc="upper left")
+        if MATPLOTLIB_3D_AVAILABLE:
+            ax3d.plot(sim_x, sim_y, sim_z, label="Sim / Ground Truth", linewidth=1.6)
+            ax3d.plot(nav_x, nav_y, nav_z, "--", label="Nav Estimate", linewidth=1.2)
+            plot_planned_path_3d(ax3d, case)
+            add_obstacles_3d(ax3d, obstacles)
+            ax3d.scatter([start[0]], [start[1]], [start[2]], marker="s", s=30, label="Start")
+            ax3d.scatter([goal[0]], [goal[1]], [goal[2]], marker="*", s=70, label="Goal")
+            ax3d.set_title(f"{case['label']} - 3D Trajectory")
+            ax3d.set_xlabel("X [m]", fontsize=8)
+            ax3d.set_ylabel("Y [m]", fontsize=8)
+            ax3d.set_zlabel("Z [m]", fontsize=8)
+            ax3d.tick_params(labelsize=7)
+            ax3d.legend(fontsize=7, loc="upper left")
 
-        extra_x = np.array(obstacles["x"] + [start[0], goal[0]])
-        extra_y = np.array(obstacles["y"] + [start[1], goal[1]])
-        extra_z = np.array([obstacles["base_z"], obstacles["base_z"] + obstacles["height"], start[2], goal[2]])
-        set_equal_3d_axes(
-            ax3d,
-            np.concatenate([sim_x, nav_x, extra_x]),
-            np.concatenate([sim_y, nav_y, extra_y]),
-            np.concatenate([sim_z, nav_z, extra_z]),
-        )
+            extra_x = np.array(obstacles["x"] + [start[0], goal[0]])
+            extra_y = np.array(obstacles["y"] + [start[1], goal[1]])
+            extra_z = np.array([obstacles["base_z"], obstacles["base_z"] + obstacles["height"], start[2], goal[2]])
+            set_equal_3d_axes(
+                ax3d,
+                np.concatenate([sim_x, nav_x, extra_x]),
+                np.concatenate([sim_y, nav_y, extra_y]),
+                np.concatenate([sim_z, nav_z, extra_z]),
+            )
+        else:
+            ax3d.plot(sim_x, sim_y, label="Sim / Ground Truth", linewidth=1.6)
+            ax3d.plot(nav_x, nav_y, "--", label="Nav Estimate", linewidth=1.2)
+            plot_planned_path_xy(ax3d, case)
+            add_obstacles_xy(ax3d, obstacles)
+            ax3d.scatter([start[0]], [start[1]], marker="s", s=30, label="Start")
+            ax3d.scatter([goal[0]], [goal[1]], marker="*", s=70, label="Goal")
+            ax3d.set_title(f"{case['label']} - XY Trajectory (3D unavailable)")
+            ax3d.set_xlabel("X [m]", fontsize=8)
+            ax3d.set_ylabel("Y [m]", fontsize=8)
+            ax3d.axis("equal")
+            ax3d.tick_params(labelsize=7)
+            ax3d.grid(True, alpha=0.35)
+            ax3d.legend(fontsize=7, loc="best")
 
         cte_x = np.abs(df_sim["cte_x"].to_numpy(dtype=float))
         cte_y = np.abs(df_sim["cte_y"].to_numpy(dtype=float))
@@ -558,7 +616,7 @@ def plot_figure2_3d_and_cte(cases, output_dir: Path, obstacles):
 
 def plot_figure3_localization_error(cases, output_dir: Path):
     fig, axes = plt.subplots(len(cases), 2, figsize=(16, 4.0 * len(cases)))
-    fig.suptitle("Week 8 UAV Navigation Result - Localization Error", fontsize=15, fontweight="bold")
+    fig.suptitle("UAV Navigation Result - Localization Error", fontsize=15, fontweight="bold")
 
     for row, case in enumerate(cases):
         data = case["aligned"]
@@ -627,7 +685,7 @@ def generate_markdown_summary(cases, output_dir: Path):
         return "\n".join(lines)
 
     md = []
-    md.append("# Week 8 LiDAR-aided Navigation Experiment Summary\n")
+    md.append("# LiDAR-aided Navigation Experiment Summary\n")
     md.append("## Experiment Conditions\n")
     md.append(make_md_table(["Case", "Filter", "GPS Update", "LiDAR Update", "LiDAR Init Only", "Description"], condition_rows))
     md.append("\n\n## Result Summary\n")
