@@ -117,9 +117,12 @@ static Input attitude_and_thrust(
     // PD 모멘트 명령.
     // P항: 목표 각도(roll_ref/pitch_ref/yaw_ref)로 맞추려는 힘.
     // D항: 회전 속도를 감쇠시켜 진동/오버슈트를 줄임.
-    const double Mx = g.kp_att_rp  * e_roll  - g.kd_att_rp  * p_rate;
-    const double My = g.kp_att_rp  * e_pitch - g.kd_att_rp  * q_rate;
-    const double Mz = g.kp_att_yaw * e_yaw   - g.kd_att_yaw * r_rate;
+    const double Mx = clamp(g.kp_att_rp  * e_roll  - g.kd_att_rp  * p_rate,
+                            -g.moment_max_rp, g.moment_max_rp);
+    const double My = clamp(g.kp_att_rp  * e_pitch - g.kd_att_rp  * q_rate,
+                            -g.moment_max_rp, g.moment_max_rp);
+    const double Mz = clamp(g.kp_att_yaw * e_yaw   - g.kd_att_yaw * r_rate,
+                            -g.moment_max_y, g.moment_max_y);
     // body 기준 roll, pitch, yaw 모멘트 명령, 6-DOF 모델에 입력으로 사용.
     u.moment_body = {Mx, My, Mz};
 

@@ -1,14 +1,19 @@
 #include <chrono>
+#include <algorithm>
+#include <cmath>
 #include <mutex>
 #include <random>
+#include <string>
+#include <vector>
 #include <rclcpp/rclcpp.hpp>
-#include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/wrench_stamped.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
 // ROS2/ament에서는 “패키지의 include 디렉토리”가 include 경로로 잡히기 때문에
 // 헤더는 include/를 빼고 패키지 경로 기준으로만 씀.
+#include <uav_dynamics/multirotor_model.hpp>
 #include <uav_dynamics/sixdof.hpp>
 
 using namespace std::chrono_literals;
@@ -70,6 +75,23 @@ public:
     input_.thrust_body = {0.0, 0.0, 0.0};
     input_.moment_body = {0.0, 0.0, 0.0};
 
+    actuator_mode_ = this->declare_parameter<std::string>("actuator_mode", "direct_wrench");
+    if (actuator_mode_ == "multirotor") {
+      const MultirotorConfig config = loadMultirotorConfig();
+      if (!multirotor_.configure(config)) {
+        RCLCPP_WARN(this->get_logger(),
+                    "Invalid multirotor config. Falling back to direct_wrench mode.");
+        actuator_mode_ = "direct_wrench";
+      } else {
+        RCLCPP_INFO(this->get_logger(),
+                    "actuator mode: multirotor (%s, rotors=%zu, motor_tau=%.3f)",
+                    config.airframe_name.c_str(), config.rotors.size(), config.motor_tau);
+      }
+    } else {
+      actuator_mode_ = "direct_wrench";
+      RCLCPP_INFO(this->get_logger(), "actuator mode: direct_wrench");
+    }
+
     // ===== pub/sub =====
     odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/sim/odom", 10);
     // "/sim/odom" 토픽으로 Odometry 메시지를 발행하는 큐 사이즈 10의 퍼블리셔 생성
@@ -77,6 +99,7 @@ public:
     // "/sim/imu" 토픽으로 Imu 메시지를 발행하는 큐 사이즈 10의 퍼블리셔 생성
     gps_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>("/sim/gps/pos", 10);
     // "/sim/gps/pos" 토픽으로  메시지를 발행하는 큐 사이즈 10의 퍼블리셔 생성
+    actuator_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>("/sim/actuator/thrusts", 10);
     
     wrench_sub_ = this->create_subscription<geometry_msgs::msg::WrenchStamped>(
       "/control/wrench", 10,
@@ -104,6 +127,60 @@ public:
   }
 
 private:
+  MultirotorConfig loadMultirotorConfig()
+  {
+    constexpr double inv_sqrt2 = 0.7071067811865475;
+    const double arm = 0.225;
+    const double x = arm * inv_sqrt2;
+    const double y = arm * inv_sqrt2;
+
+    MultirotorConfig config;
+    config.airframe_name = this->declare_parameter<std::string>("airframe_name", "f450_quad_x");
+    config.motor_tau = this->declare_parameter<double>("motor_tau", 0.04);
+    config.yaw_torque_to_thrust = this->declare_parameter<double>("yaw_torque_to_thrust", 0.016);
+
+    const std::vector<std::string> default_names{
+      "front_left", "front_right", "rear_right", "rear_left"
+    };
+    const std::vector<double> default_positions{
+       x,  y, 0.0,
+       x, -y, 0.0,
+      -x, -y, 0.0,
+      -x,  y, 0.0
+    };
+    const std::vector<double> default_yaw_signs{1.0, -1.0, 1.0, -1.0};
+    const std::vector<double> default_min{0.0, 0.0, 0.0, 0.0};
+    const std::vector<double> default_max{15.0, 15.0, 15.0, 15.0};
+
+    const auto names = this->declare_parameter<std::vector<std::string>>("rotor_names", default_names);
+    const auto positions = this->declare_parameter<std::vector<double>>("rotor_positions_body", default_positions);
+    const auto yaw_signs = this->declare_parameter<std::vector<double>>("rotor_yaw_torque_signs", default_yaw_signs);
+    const auto thrust_min = this->declare_parameter<std::vector<double>>("rotor_thrust_min", default_min);
+    const auto thrust_max = this->declare_parameter<std::vector<double>>("rotor_thrust_max", default_max);
+
+    const std::size_t n = names.size();
+    if (n == 0 || positions.size() != 3 * n || yaw_signs.size() != n ||
+        thrust_min.size() != n || thrust_max.size() != n) {
+      RCLCPP_WARN(this->get_logger(),
+                  "Rotor parameter size mismatch: names=%zu positions=%zu yaw_signs=%zu min=%zu max=%zu",
+                  names.size(), positions.size(), yaw_signs.size(), thrust_min.size(), thrust_max.size());
+      return config;
+    }
+
+    config.rotors.reserve(n);
+    for (std::size_t i = 0; i < n; ++i) {
+      RotorConfig rotor;
+      rotor.name = names[i];
+      rotor.position_body = {positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]};
+      rotor.yaw_torque_sign = yaw_signs[i] >= 0.0 ? 1.0 : -1.0;
+      rotor.thrust_min = std::max(0.0, thrust_min[i]);
+      rotor.thrust_max = std::max(rotor.thrust_min, thrust_max[i]);
+      config.rotors.push_back(rotor);
+    }
+
+    return config;
+  }
+
   void wrenchCallback(const geometry_msgs::msg::WrenchStamped::SharedPtr msg)
   {
     // [추가] 들어온 힘 값이 NaN(숫자가 아님)이면 무시하고 리턴 (방어 코드)
@@ -136,9 +213,15 @@ private:
       u_copy = input_; // 복사본을 만들어서 뒷부분 적분에 사용
     }
 
+    Input applied_u = u_copy;
+    if (actuator_mode_ == "multirotor") {
+      applied_u = multirotor_.update(u_copy, dt_);
+      publishActuatorDebug();
+    }
+
     // ===== IMU 생성용: 현재 상태에서의 가속도/각속도 계산 =====
     // d.dv: world frame 선형가속도 (중력 포함)
-    const Deriv d = derivatives(state_, u_copy, params_);
+    const Deriv d = derivatives(state_, applied_u, params_);
     const Vec3 gravity{0.0, 0.0, -params_.g};
 
     // specific force = a_world - g_world (world) 를 body로 회전, f = a - g 이 후 body frame으로 변환함.
@@ -146,7 +229,7 @@ private:
     const Vec3 specific_force_world = d.dv - gravity;
     const Vec3 accel_body = state_.q.rotateWorldToBody(specific_force_world);
 
-    state_ = rk4_step(state_, u_copy, params_, dt_);
+    state_ = rk4_step(state_, applied_u, params_, dt_);
 
     // ===== 지면 충돌(Ground Collision) 방지 로직 =====
     // 시뮬레이터 상에서 드론이 땅(Z=0) 밑으로 뚫고 내려가지 않도록 강제함 (음슴체)
@@ -230,18 +313,31 @@ private:
     }
   }
 
+  void publishActuatorDebug()
+  {
+    const ActuatorDebug& debug = multirotor_.debug();
+    std_msgs::msg::Float64MultiArray msg;
+    msg.data.reserve(debug.thrust_cmd.size() + debug.thrust_actual.size());
+    msg.data.insert(msg.data.end(), debug.thrust_cmd.begin(), debug.thrust_cmd.end());
+    msg.data.insert(msg.data.end(), debug.thrust_actual.begin(), debug.thrust_actual.end());
+    actuator_pub_->publish(msg);
+  }
+
 private:
   double dt_{0.01};
 
   Params params_;
   State  state_;
   Input  input_;
+  std::string actuator_mode_{"direct_wrench"};
+  MultirotorModel multirotor_;
 
   std::mutex mtx_;
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr gps_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr actuator_pub_;
   rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr wrench_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
 

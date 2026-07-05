@@ -20,3 +20,23 @@ simulation_node:
     noise_gps: 0.01   # 기존 0.5 -> 1.0로 노이즈 2배 증가(저가형 GPS 썼다 가정, 궤적 생성에 상당히 비중 있음)
     wind_x: 0.0      # X 방향으로 지속적으로 미는 바람 (N)
     wind_y: 0.0     # Y 방향으로 지속적으로 미는 바람 (N)
+
+    # ===== Actuator model =====
+    # direct_wrench: 기존 방식. /control/wrench의 body force/moment를 sixdof에 바로 입력
+    # multirotor: control allocator -> motor first-order dynamics -> rotor force/moment -> sixdof
+    actuator_mode: "direct_wrench"
+
+    # F450 Quad-X airframe preset. actuator_mode를 "multirotor"로 바꾸면 아래 값을 사용함.
+    airframe_name: "f450_quad_x"
+    motor_tau: 0.04
+    yaw_torque_to_thrust: 0.016
+    rotor_names: ["front_left", "front_right", "rear_right", "rear_left"]
+    rotor_positions_body: [
+       0.1591,  0.1591, 0.0,
+       0.1591, -0.1591, 0.0,
+      -0.1591, -0.1591, 0.0,
+      -0.1591,  0.1591, 0.0
+    ]
+    rotor_yaw_torque_signs: [1.0, -1.0, 1.0, -1.0]
+    rotor_thrust_min: [0.0, 0.0, 0.0, 0.0]
+    rotor_thrust_max: [15.0, 15.0, 15.0, 15.0]

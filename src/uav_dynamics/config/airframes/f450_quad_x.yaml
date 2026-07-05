@@ -1,0 +1,19 @@
+simulation_node:
+  ros__parameters:
+    actuator_mode: "multirotor"
+    airframe_name: "f450_quad_x"
+
+    # Body frame: x forward, y left, z up. World frame: ENU/z-up.
+    # Rotor order: front-left, front-right, rear-right, rear-left.
+    motor_tau: 0.04
+    yaw_torque_to_thrust: 0.016
+    rotor_names: ["front_left", "front_right", "rear_right", "rear_left"]
+    rotor_positions_body: [
+       0.1591,  0.1591, 0.0,
+       0.1591, -0.1591, 0.0,
+      -0.1591, -0.1591, 0.0,
+      -0.1591,  0.1591, 0.0
+    ]
+    rotor_yaw_torque_signs: [1.0, -1.0, 1.0, -1.0]
+    rotor_thrust_min: [0.0, 0.0, 0.0, 0.0]
+    rotor_thrust_max: [15.0, 15.0, 15.0, 15.0]

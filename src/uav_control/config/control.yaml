@@ -15,7 +15,7 @@ control_node:
     kp_pos_z: 2.0 # Lag 감소를 위해 P,D 게인 강화 
     kp_vel_xy: 2.5 # 2.5
     kp_vel_z: 5.0 # Lag 감소를 위해 P,D 게인 강화 
-    max_tilt_deg: 35.0
+    max_tilt_deg: 22.0
     # 적분 제어 게인 파라미터(끄고 싶으면 값 I 게인 0으로)
     ki_vel_xy: 1.0 # 0.5 1.0
     # 공기 저항으로 인한 지연 현상을 없애기 위해 적분기 값 늘림
@@ -23,10 +23,14 @@ control_node:
     max_int_vxy: 3.0 # 5.0
     max_int_vz: 3.0 # 5.0
         # 가이던스의 3D 목표 속도/가속도가 짤리지 않도록 리밋 넉넉하게 확장
-    max_vxy_cmd: 5.0
-    max_axy_cmd: 10.0
-    max_vz_cmd: 5.0   # 기존 2.0 -> 5.0
-    max_az_cmd: 10.0  # 기존 6.0 -> 10.0
+    max_vxy_cmd: 2.5
+    max_axy_cmd: 5.0
+    max_vz_cmd: 2.5
+    max_az_cmd: 6.0
+    thrust_min: 0.0
+    thrust_max: 55.0
+    moment_max_rp: 0.80
+    moment_max_y: 0.20
     # ===== Linear MPC 제어기 설정 =====
     use_mpc: false
     mpc_N: 15

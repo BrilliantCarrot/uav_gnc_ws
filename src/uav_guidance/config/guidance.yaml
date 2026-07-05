@@ -21,7 +21,7 @@ guidance_node:
     lookahead_dist: 2.0         
 
     # 7주차 (Polynomial) 용 파라미터
-    avg_speed: 1.5 # 코너 진입 속도
+    avg_speed: 0.9 # actuator-level multirotor 모델에서 추종 가능한 평균 속도
     
     hold_last: true
 

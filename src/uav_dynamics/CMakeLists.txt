@@ -14,9 +14,11 @@ find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 add_library(uav_dynamics_core
   src/sixdof.cpp
+  src/multirotor_model.cpp
 )
 
 target_include_directories(uav_dynamics_core PUBLIC
@@ -33,7 +35,7 @@ target_link_libraries(simulation_node
 )
 
 ament_target_dependencies(simulation_node
-  rclcpp geometry_msgs nav_msgs sensor_msgs
+  rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs
 )
 
 install(TARGETS

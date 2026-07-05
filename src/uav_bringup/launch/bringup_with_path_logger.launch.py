@@ -1,7 +1,8 @@
 from launch import LaunchDescription
-from launch.actions import RegisterEventHandler, EmitEvent
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler, EmitEvent
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 import os
@@ -92,6 +93,8 @@ LiDAR 기반 occupancy update와 D* Lite planner가 장애물 회피 경로를 �
 """
 
 def generate_launch_description():
+    actuator_mode = LaunchConfiguration('actuator_mode')
+
     dynamics_pkg = get_package_share_directory('uav_dynamics')
     guidance_pkg = get_package_share_directory('uav_guidance')
     control_pkg = get_package_share_directory('uav_control')
@@ -126,7 +129,7 @@ def generate_launch_description():
         executable='simulation_node',   # CMake에서 만든 실행파일 이름
         name='simulation_node',
         output='screen',
-        parameters=[simulation_yaml]
+        parameters=[simulation_yaml, {'actuator_mode': actuator_mode}]
     )
     guidance = Node(
         package='uav_guidance',
@@ -295,6 +298,11 @@ def generate_launch_description():
         )
     )
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'actuator_mode',
+            default_value='direct_wrench',
+            description='Simulation actuator mode: direct_wrench or multirotor'
+        ),
         simulation,
         guidance,
         navigation,
