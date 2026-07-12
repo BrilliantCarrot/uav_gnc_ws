@@ -46,3 +46,10 @@ control_node:
     mpc_ki_pos_xy:   0.2
     mpc_ki_pos_z:    0.1
     mpc_max_int_pos: 4.0
+    # 현재 UAV MPC는 AMR처럼 OSQP hard constraint를 풀지 않고,
+    # unconstrained 해를 구한 뒤 reference velocity / acceleration output을 제한한다.
+    mpc_use_output_constraints: true
+    mpc_max_acc_xy: 5.0
+    mpc_max_acc_z: 6.0
+    mpc_max_vel_xy: 2.5
+    mpc_max_vel_z: 2.5

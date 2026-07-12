@@ -111,6 +111,16 @@ public:
             mpc_params_.ki_pos_xy   = this->declare_parameter<double>("mpc_ki_pos_xy",   0.3);
             mpc_params_.ki_pos_z    = this->declare_parameter<double>("mpc_ki_pos_z",    0.2);
             mpc_params_.max_int_pos = this->declare_parameter<double>("mpc_max_int_pos", 2.0);
+            mpc_params_.use_output_constraints =
+                this->declare_parameter<bool>("mpc_use_output_constraints", true);
+            mpc_params_.max_acc_xy =
+                this->declare_parameter<double>("mpc_max_acc_xy", gains_.max_axy_cmd);
+            mpc_params_.max_acc_z =
+                this->declare_parameter<double>("mpc_max_acc_z", gains_.max_az_cmd);
+            mpc_params_.max_vel_xy =
+                this->declare_parameter<double>("mpc_max_vel_xy", gains_.max_vxy_cmd);
+            mpc_params_.max_vel_z =
+                this->declare_parameter<double>("mpc_max_vel_z", gains_.max_vz_cmd);
 
             mpc_controller_.init(mpc_params_, params_, gains_, dt_);
             // 노드가 켜지는 순간 Φ, Γ, H, K_first_를 한 번에 계산

@@ -518,6 +518,25 @@ Input MPCController::update(const State& s, const Ref& ref)
             X_ref.segment(k * nx_, nx_) = x_ref;  // 동일 setpoint N번 반복
     }
 
+    if (mpc_p_.use_output_constraints) {
+        for (int k = 0; k < mpc_p_.N; ++k) {
+            const int idx = k * nx_;
+
+            double vx = X_ref(idx + 3);
+            double vy = X_ref(idx + 4);
+            const double vxy = std::hypot(vx, vy);
+            if (vxy > mpc_p_.max_vel_xy && vxy > 1e-9) {
+                const double scale = mpc_p_.max_vel_xy / vxy;
+                vx *= scale;
+                vy *= scale;
+            }
+
+            X_ref(idx + 3) = vx;
+            X_ref(idx + 4) = vy;
+            X_ref(idx + 5) = clamp(X_ref(idx + 5), -mpc_p_.max_vel_z, mpc_p_.max_vel_z);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // STEP 3. 오차 벡터 e₀ 계산 (N·nx × 1 = 90×1)
     //
@@ -594,9 +613,19 @@ Input MPCController::update(const State& s, const Ref& ref)
     integral_pos_.z = std::max(-mi, std::min(mi, integral_pos_.z));
 
     // MPC 비례 피드백 + 적분 보상 합산
-    const double ax_cmd = u0(0) + mpc_p_.ki_pos_xy * integral_pos_.x;
-    const double ay_cmd = u0(1) + mpc_p_.ki_pos_xy * integral_pos_.y;
-    const double az_cmd = u0(2) + mpc_p_.ki_pos_z  * integral_pos_.z;
+    double ax_cmd = u0(0) + mpc_p_.ki_pos_xy * integral_pos_.x;
+    double ay_cmd = u0(1) + mpc_p_.ki_pos_xy * integral_pos_.y;
+    double az_cmd = u0(2) + mpc_p_.ki_pos_z  * integral_pos_.z;
+
+    if (mpc_p_.use_output_constraints) {
+        const double axy = std::hypot(ax_cmd, ay_cmd);
+        if (axy > mpc_p_.max_acc_xy && axy > 1e-9) {
+            const double scale = mpc_p_.max_acc_xy / axy;
+            ax_cmd *= scale;
+            ay_cmd *= scale;
+        }
+        az_cmd = clamp(az_cmd, -mpc_p_.max_acc_z, mpc_p_.max_acc_z);
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // STEP 6. 자세 제어 inner loop으로 넘기기

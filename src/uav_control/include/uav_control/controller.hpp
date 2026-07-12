@@ -116,6 +116,15 @@ struct MPCParams {
     double ki_pos_xy   = 0.3;  // XY 위치 적분 게인 (너무 크면 오버슈트, 작으면 수렴 느림)
     double ki_pos_z    = 0.2;  // Z  위치 적분 게인
     double max_int_pos = 2.0;  // 적분기 포화 방지(anti-windup) 한계값 [m/s² 단위]
+
+    // MPC 출력 제약.
+    // 현재 UAV MPC는 AMR처럼 OSQP QP 내부 hard constraint를 푸는 구조가 아니라,
+    // unconstrained linear MPC 해를 계산한 뒤 actuator/tilt 한계에 맞게 명령을 제한한다.
+    bool   use_output_constraints = true;
+    double max_acc_xy = 5.0;    // world-frame 수평 가속도 명령 제한 [m/s^2]
+    double max_acc_z  = 6.0;    // world-frame 수직 가속도 명령 제한 [m/s^2]
+    double max_vel_xy = 2.5;    // preview/fallback reference 수평 속도 제한 [m/s]
+    double max_vel_z  = 2.5;    // preview/fallback reference 수직 속도 제한 [m/s]
 };
 
 // ======================================================================
