@@ -19,6 +19,7 @@
   <exec_depend>uav_perception</exec_depend>
   <exec_depend>uav_evaluation</exec_depend>
   <exec_depend>uav_visualization</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

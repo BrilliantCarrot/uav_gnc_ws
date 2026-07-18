@@ -49,6 +49,10 @@ public:
     double n_acc = this->declare_parameter<double>("noise_acc", 0.1); // 가속도계 노이즈 표준편차 (m/s^2)
     double n_gyr = this->declare_parameter<double>("noise_gyr", 0.01); // 자이로 노이즈 표준편차 (rad/s)
     double n_gps = this->declare_parameter<double>("noise_gps", 0.5); // GPS 노이즈 표준편차 (m) - 위치 측정 오차, EKF 튜닝에 중요
+    ground_contact_imu_correction_ =
+      this->declare_parameter<bool>("ground_contact_imu_correction", true);
+    state_log_enabled_ = this->declare_parameter<bool>("state_log_enabled", true);
+    state_log_period_ms_ = this->declare_parameter<int>("state_log_period_ms", 1000);
 
     // [중요] 혹시 0.0이 들어오면 강제로 기본값 설정 (NaN 방지)
     if (n_acc <= 0) n_acc = 0.1;
@@ -224,21 +228,34 @@ private:
     const Deriv d = derivatives(state_, applied_u, params_);
     const Vec3 gravity{0.0, 0.0, -params_.g};
 
-    // specific force = a_world - g_world (world) 를 body로 회전, f = a - g 이 후 body frame으로 변환함.
-    // "specific force"는 가속도에서 중력 가속도를 뺀 값으로, IMU의 가속도계가 측정하는 실제 가속도입.
-    const Vec3 specific_force_world = d.dv - gravity;
-    const Vec3 accel_body = state_.q.rotateWorldToBody(specific_force_world);
+    Vec3 accel_world_for_imu = d.dv;
 
     state_ = rk4_step(state_, applied_u, params_, dt_);
 
     // ===== 지면 충돌(Ground Collision) 방지 로직 =====
     // 시뮬레이터 상에서 드론이 땅(Z=0) 밑으로 뚫고 내려가지 않도록 강제함 (음슴체)
+    bool ground_contact = false;
     if (state_.p.z < 0.0) {
         state_.p.z = 0.0;          // 위치를 바닥으로 고정
         if (state_.v.z < 0.0) {
             state_.v.z = 0.0;      // 떨어지던 속도 소멸
         }
+        ground_contact = true;
+    } else if (state_.p.z <= 1e-6 && state_.v.z <= 1e-6 && accel_world_for_imu.z < 0.0) {
+        ground_contact = true;
     }
+
+    // 지면 constraint 때문에 z운동이 막힌 상태에서는 IMU도 자유낙하가 아니라
+    // 정지/접촉 상태의 specific force를 내야 한다. 이 보정이 없으면 launch 초반
+    // 제어 입력 수신 전 0 thrust 구간을 EKF가 자유낙하로 적분해 /nav/odom z가 크게 내려간다.
+    if (ground_contact_imu_correction_ && ground_contact && accel_world_for_imu.z < 0.0) {
+        accel_world_for_imu.z = 0.0;
+    }
+
+    // specific force = a_world - g_world (world) 를 body로 회전, f = a - g 이 후 body frame으로 변환함.
+    // "specific force"는 가속도에서 중력 가속도를 뺀 값으로, IMU의 가속도계가 측정하는 실제 가속도임.
+    const Vec3 specific_force_world = accel_world_for_imu - gravity;
+    const Vec3 accel_body = state_.q.rotateWorldToBody(specific_force_world);
 
     // Odometry publish
     nav_msgs::msg::Odometry odom; // 드론/로봇의 상태를 나타내는 표준 메시지 타입
@@ -266,6 +283,17 @@ private:
     odom.twist.twist.angular.z = state_.w.z;
 
     odom_pub_->publish(odom); // 퍼블리셔로 메시지 발행하여 ROS 네트워크에 전파
+
+    if (state_log_enabled_) {
+      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), state_log_period_ms_,
+        "[Sim State] p=(%.2f, %.2f, %.2f)m v=(%.2f, %.2f, %.2f)m/s w_body=(%.2f, %.2f, %.2f)rad/s input_Fz=%.2fN input_M=(%.3f, %.3f, %.3f)Nm mode=%s",
+        state_.p.x, state_.p.y, state_.p.z,
+        state_.v.x, state_.v.y, state_.v.z,
+        state_.w.x, state_.w.y, state_.w.z,
+        applied_u.thrust_body.z,
+        applied_u.moment_body.x, applied_u.moment_body.y, applied_u.moment_body.z,
+        actuator_mode_.c_str());
+    }
 
     // ===== IMU publish (100 Hz = every step) =====
     sensor_msgs::msg::Imu imu;
@@ -330,6 +358,9 @@ private:
   State  state_;
   Input  input_;
   std::string actuator_mode_{"direct_wrench"};
+  bool ground_contact_imu_correction_{true};
+  bool state_log_enabled_{true};
+  int state_log_period_ms_{1000};
   MultirotorModel multirotor_;
 
   std::mutex mtx_;

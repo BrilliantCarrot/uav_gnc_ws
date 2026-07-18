@@ -31,6 +31,14 @@ add_executable(virtual_lidar_node
   src/virtual_lidar_node.cpp
 )
 
+add_executable(raw_lidar_sim_node
+  src/raw_lidar_sim_node.cpp
+)
+
+add_executable(imu_lio_adapter_node
+  src/imu_lio_adapter_node.cpp
+)
+
 add_executable(lidar_preprocess_node
   src/lidar_preprocess_node.cpp
 )
@@ -45,6 +53,14 @@ add_executable(occupancy_projection_node
 
 ament_target_dependencies(virtual_lidar_node
   rclcpp nav_msgs sensor_msgs uav_dynamics
+)
+
+ament_target_dependencies(raw_lidar_sim_node
+  rclcpp nav_msgs sensor_msgs uav_dynamics
+)
+
+ament_target_dependencies(imu_lio_adapter_node
+  rclcpp sensor_msgs
 )
 
 ament_target_dependencies(lidar_preprocess_node
@@ -69,6 +85,8 @@ target_link_libraries(occupancy_projection_node
 
 install(TARGETS
   virtual_lidar_node
+  raw_lidar_sim_node
+  imu_lio_adapter_node
   lidar_preprocess_node
   lidar_pose_correction_node
   occupancy_projection_node

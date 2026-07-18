@@ -31,6 +31,8 @@ control_node:
     thrust_max: 55.0
     moment_max_rp: 0.80
     moment_max_y: 0.20
+    control_log_enabled: true
+    control_log_period_ms: 500
     # ===== Linear MPC 제어기 설정 =====
     use_mpc: false
     mpc_N: 15

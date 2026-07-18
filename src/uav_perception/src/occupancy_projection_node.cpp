@@ -37,6 +37,8 @@ public:
     slice_z_max_rel_ = this->declare_parameter<double>("slice_z_max_rel", 1.0);
     min_points_per_cell_ = this->declare_parameter<int>("min_points_per_cell", 2);
     marker_height_ = this->declare_parameter<double>("marker_height", 2.0);
+    debug_log_enabled_ = this->declare_parameter<bool>("debug_log_enabled", true);
+    debug_log_period_ms_ = this->declare_parameter<int>("debug_log_period_ms", 2000);
 
     grid_w_ = static_cast<int>(std::round(grid_width_m_ / grid_resolution_));
     grid_h_ = static_cast<int>(std::round(grid_height_m_ / grid_resolution_));
@@ -103,18 +105,21 @@ private:
 
     int in_slice_points = 0;   // z-slice 통과한 포인트 수 기록용 
     int in_grid_points = 0;    // grid 범위 안에 들어온 포인트 수 기록용
-    bool first_point_logged = false;  // 첫 포인트 한 번만 로그 찍기용
+    bool have_first_point = false;
+    double first_x = 0.0;
+    double first_y = 0.0;
+    double first_z = 0.0;
 
     for (const auto & pt : cloud->points) {
       if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) {
         continue;
       }
 
-      if (!first_point_logged) {
-        RCLCPP_INFO(this->get_logger(),
-          "[Occupancy Projection Debug] first_pt=(%.2f, %.2f, %.2f)",
-          pt.x, pt.y, pt.z);
-        first_point_logged = true;
+      if (!have_first_point) {
+        first_x = pt.x;
+        first_y = pt.y;
+        first_z = pt.z;
+        have_first_point = true;
       }
 
       if (pt.z < z_min || pt.z > z_max) {
@@ -148,9 +153,12 @@ private:
     grid_pub_->publish(grid_msg_);
     publishMarkers(msg->header.stamp);
 
-    RCLCPP_INFO(this->get_logger(),
-      "[Occupancy Projection Debug] cloud_pts=%zu z_ref=%.2f z_slice=[%.2f, %.2f] in_slice=%d in_grid=%d occupied_cells=%d min_points_per_cell=%d",
-      cloud->size(), z_ref, z_min, z_max, in_slice_points, in_grid_points, occupied_count, min_points_per_cell_);
+    if (debug_log_enabled_) {
+      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), debug_log_period_ms_,
+        "[Occupancy Projection] cloud=%zu first=(%.2f, %.2f, %.2f) z_ref=%.2f slice=[%.2f, %.2f] in_slice=%d in_grid=%d occupied=%d min_pts=%d",
+        cloud->size(), first_x, first_y, first_z, z_ref, z_min, z_max,
+        in_slice_points, in_grid_points, occupied_count, min_points_per_cell_);
+    }
   }
 
   void publishMarkers(const rclcpp::Time & stamp)
@@ -224,6 +232,8 @@ private:
   double slice_z_max_rel_{1.0};
   double marker_height_{2.0};
   int min_points_per_cell_{2};
+  bool debug_log_enabled_{true};
+  int debug_log_period_ms_{2000};
 
   int grid_w_{0};
   int grid_h_{0};

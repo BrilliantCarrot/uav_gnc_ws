@@ -34,5 +34,10 @@ path_planner_node:
     # ── 동적 occupancy grid 연동 ───────────────────────────────
     use_dynamic_occupancy: true
     replan_on_map_change: true
-    replan_on_start_move_m: 0.5
+    # start가 이동했다는 이유만으로 재계획하면 guidance trajectory가 계속 리셋되어
+    # 비행 중 멈춤/회전/되돌아감이 생길 수 있으므로 기본은 map/goal 변화 기반 재계획만 사용
+    replan_on_start_move: false
+    replan_on_start_move_m: 1.5
     occupancy_threshold: 50
+    min_changed_cells_for_replan: 4
+    map_replan_cooldown_s: 1.5

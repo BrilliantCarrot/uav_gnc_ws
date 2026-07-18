@@ -1,0 +1,52 @@
+/**:
+  ros__parameters:
+    feature_extract_enable: false
+    point_filter_num: 1
+    max_iteration: 3
+    filter_size_surf: 0.3
+    filter_size_map: 0.3
+    cube_side_length: 100.0
+    runtime_pos_log_enable: false
+    map_file_path: "/tmp/uav_gnc_fast_lio2_map.pcd"
+
+    common:
+      lid_topic: "/lidar/points_raw"
+      imu_topic: "/lio/imu"
+      time_sync_en: false
+      time_offset_lidar_to_imu: 0.0
+
+    preprocess:
+      # Use standard sensor_msgs/PointCloud2 path.
+      # raw_lidar_sim_node publishes x/y/z/intensity/time/ring fields in lidar frame.
+      lidar_type: 2
+      scan_line: 16
+      scan_rate: 10
+      timestamp_unit: 0
+      blind: 0.5
+
+    mapping:
+      acc_cov: 0.1
+      gyr_cov: 0.1
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
+      fov_degree: 360.0
+      det_range: 30.0
+      extrinsic_est_en: false
+      # FAST-LIO defines these as LiDAR pose in IMU body frame.
+      # Current simulated extrinsic: IMU at base_link origin, LiDAR 5 cm above base_link.
+      extrinsic_T: [0.0, 0.0, 0.05]
+      extrinsic_R: [1.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0,
+                    0.0, 0.0, 1.0]
+
+    publish:
+      path_en: true
+      scan_publish_en: true
+      dense_publish_en: true
+      scan_bodyframe_pub_en: true
+      effect_map_en: false
+      map_en: false
+
+    pcd_save:
+      pcd_save_en: false
+      interval: -1

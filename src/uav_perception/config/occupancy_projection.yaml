@@ -20,3 +20,7 @@ occupancy_projection_node:
 
     min_points_per_cell: 1
     marker_height: 2.0
+
+    # point cloud projection 디버그 요약 로그. 너무 자주 찍히지 않도록 throttle함.
+    debug_log_enabled: true
+    debug_log_period_ms: 2000

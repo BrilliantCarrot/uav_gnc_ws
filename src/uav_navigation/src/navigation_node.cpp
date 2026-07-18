@@ -89,6 +89,8 @@ public:
     //   IMU-only drift를 비교하기 위한 실패/비교군 실험에 사용함.
     this->declare_parameter<bool>("use_lidar_init_only", false);
     this->get_parameter("use_lidar_init_only", use_lidar_init_only_);
+    state_log_enabled_ = this->declare_parameter<bool>("state_log_enabled", true);
+    state_log_period_ms_ = this->declare_parameter<int>("state_log_period_ms", 1000);
 
     // filter_type 문자열을 bool flag로 변환함.
     // use_ukf_가 true이면 UKF 객체를 사용하고, false이면 EKF 객체를 사용함.
@@ -453,6 +455,17 @@ private:
     odom.twist.twist.angular.z = current_gyro_.z();
 
     odom_pub_->publish(odom);
+
+    if (state_log_enabled_) {
+      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), state_log_period_ms_,
+        "[Nav State] filter=%s p=(%.2f, %.2f, %.2f)m v=(%.2f, %.2f, %.2f)m/s gyro=(%.2f, %.2f, %.2f)rad/s gps=%s lidar=%s",
+        use_ukf_ ? "UKF" : "EKF",
+        p.x(), p.y(), p.z(),
+        v.x(), v.y(), v.z(),
+        current_gyro_.x(), current_gyro_.y(), current_gyro_.z(),
+        use_gps_update_ ? "on" : "off",
+        use_lidar_update_ ? "on" : "off");
+    }
   }
 
 private:
@@ -465,6 +478,8 @@ private:
   bool use_gps_update_{true};
   bool use_lidar_update_{false};
   bool use_lidar_init_only_{false};
+  bool state_log_enabled_{true};
+  int state_log_period_ms_{1000};
   double lidar_reject_threshold_m_{10.0};
 
   // 실제 필터 객체

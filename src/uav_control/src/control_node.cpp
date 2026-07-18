@@ -93,6 +93,8 @@ public:
         gains_.thrust_max    = this->declare_parameter<double>("thrust_max",    gains_.thrust_max);
         gains_.moment_max_rp = this->declare_parameter<double>("moment_max_rp", gains_.moment_max_rp);
         gains_.moment_max_y  = this->declare_parameter<double>("moment_max_y",  gains_.moment_max_y);
+        control_log_enabled_ = this->declare_parameter<bool>("control_log_enabled", true);
+        control_log_period_ms_ = this->declare_parameter<int>("control_log_period_ms", 1000);
 
         // ── MPC 초기화 ────────────────────────────────────────────────
         use_mpc_ = this->declare_parameter<bool>("use_mpc", false);
@@ -244,6 +246,24 @@ private:
         wrench.wrench.torque.y = u.moment_body.y;
         wrench.wrench.torque.z = u.moment_body.z;
         wrench_pub_->publish(wrench);
+
+        if (control_log_enabled_) {
+            const double epx = ref.p_ref.x - s.p.x;
+            const double epy = ref.p_ref.y - s.p.y;
+            const double epz = ref.p_ref.z - s.p.z;
+            const double evx = ref.v_ref.x - s.v.x;
+            const double evy = ref.v_ref.y - s.v.y;
+            const double evz = ref.v_ref.z - s.v.z;
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), control_log_period_ms_,
+                "[Control Debug] mode=%s p=(%.2f, %.2f, %.2f) ref=(%.2f, %.2f, %.2f) e_p=(%.2f, %.2f, %.2f) e_v=(%.2f, %.2f, %.2f) F_body=(%.2f, %.2f, %.2f)N M_body=(%.3f, %.3f, %.3f)Nm",
+                use_mpc_ ? "MPC" : "PID",
+                s.p.x, s.p.y, s.p.z,
+                ref.p_ref.x, ref.p_ref.y, ref.p_ref.z,
+                epx, epy, epz,
+                evx, evy, evz,
+                u.thrust_body.x, u.thrust_body.y, u.thrust_body.z,
+                u.moment_body.x, u.moment_body.y, u.moment_body.z);
+        }
     }
 
     double          dt_{0.01};
@@ -256,6 +276,8 @@ private:
     Ref             ref_;
     bool            has_state_{false};
     bool            has_ref_{false};
+    bool            control_log_enabled_{true};
+    int             control_log_period_ms_{1000};
     std::mutex      mtx_;
     std::string     odom_topic_;
     Vec3            int_e_v_{0.0, 0.0, 0.0};

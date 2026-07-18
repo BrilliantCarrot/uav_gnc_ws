@@ -1,0 +1,28 @@
+# FAST-LIO2 integration contract for this UAV GNC workspace.
+#
+# Run FAST-LIO2 externally and remap/configure it to consume:
+#   LiDAR point cloud: /lidar/points_raw   sensor_msgs/PointCloud2, frame_id=lidar
+#   IMU:               /lio/imu            sensor_msgs/Imu, frame_id=imu
+#
+# FAST-LIO2 should publish:
+#   Odometry:          /lio/odom           nav_msgs/Odometry, frame_id=world or odom
+#
+# The localization_manager_node then validates /lio/odom and republishes /nav/odom
+# for guidance/planning/control. /sim/odom remains ground truth for evaluation only.
+fast_lio2_interface:
+  ros__parameters:
+    pointcloud_topic: "/lidar/points_raw"
+    imu_topic: "/lio/imu"
+    lio_odom_topic: "/lio/odom"
+    nav_odom_topic: "/nav/odom"
+
+    world_frame: "world"
+    body_frame: "base_link"
+    lidar_frame: "lidar"
+    imu_frame: "imu"
+
+    # Static extrinsics currently used by lio_primary.launch.py.
+    base_to_lidar_xyz: [0.0, 0.0, 0.05]
+    base_to_lidar_rpy: [0.0, 0.0, 0.0]
+    base_to_imu_xyz: [0.0, 0.0, 0.0]
+    base_to_imu_rpy: [0.0, 0.0, 0.0]

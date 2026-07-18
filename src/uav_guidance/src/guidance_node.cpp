@@ -56,6 +56,24 @@ public:
     // control.yaml의 mpc_N, dt와 일치시켜야 함
     mpc_N_  = this->declare_parameter<int>("mpc_preview_N", 15);   // MPC horizon 스텝 수
     mpc_dt_ = this->declare_parameter<double>("mpc_preview_dt", 0.01); // MPC 제어 주기(s)
+    reference_log_enabled_ = this->declare_parameter<bool>("reference_log_enabled", true);
+    reference_log_period_ms_ = this->declare_parameter<int>("reference_log_period_ms", 1000);
+    planner_path_change_threshold_m_ =
+      this->declare_parameter<double>("planner_path_change_threshold_m", 0.8);
+    planner_retrajectory_min_interval_s_ =
+      this->declare_parameter<double>("planner_retrajectory_min_interval_s", 1.5);
+    planner_path_prune_radius_m_ =
+      this->declare_parameter<double>("planner_path_prune_radius_m", 1.0);
+    planner_goal_change_threshold_m_ =
+      this->declare_parameter<double>("planner_goal_change_threshold_m", 0.75);
+    reference_acc_limit_xy_ =
+      this->declare_parameter<double>("reference_acc_limit_xy", 3.0);
+    max_yaw_rate_dps_ =
+      this->declare_parameter<double>("max_yaw_rate_dps", 60.0);
+    final_direct_guidance_wp_count_ =
+      this->declare_parameter<int>("final_direct_guidance_wp_count", 3);
+    final_direct_accept_radius_ =
+      this->declare_parameter<double>("final_direct_accept_radius", 0.35);
 
     // ---------------------------------------------------
     // 2. Pub / Sub 및 타이머 설정
@@ -101,31 +119,141 @@ private:
     return q;
   }
 
-  bool isPlannerPathMeaningfullyChanged(const nav_msgs::msg::Path::SharedPtr msg) {
-    if (msg->poses.empty()) return false;
+  static double wrapAngle(double a) {
+    while (a > M_PI) a -= 2.0 * M_PI;
+    while (a < -M_PI) a += 2.0 * M_PI;
+    return a;
+  }
 
-    if (last_path_x_.size() != msg->poses.size()) return true;
+  double slewYaw(double desired_yaw) const {
+    const double max_step =
+      std::max(0.0, max_yaw_rate_dps_) * M_PI / 180.0 / std::max(1.0, rate_hz_);
+    const double err = wrapAngle(desired_yaw - current_yaw_);
+    const double limited = std::max(-max_step, std::min(max_step, err));
+    return wrapAngle(current_yaw_ + limited);
+  }
+
+  bool shouldUseDirectGoalGuidance() const {
+    return use_planner_ &&
+      wp_x_.size() >= 2 &&
+      wp_x_.size() <= static_cast<size_t>(std::max(2, final_direct_guidance_wp_count_));
+  }
+
+  bool fillDirectGoalSetpoint(nav_msgs::msg::Odometry& sp) {
+    if (wp_x_.empty()) return false;
+
+    const double gx = wp_x_.back();
+    const double gy = wp_y_.back();
+    const double gz = wp_z_.back();
+
+    const double dx = gx - current_x_;
+    const double dy = gy - current_y_;
+    const double dz = gz - current_z_;
+    const double dist = std::hypot(dx, dy, dz);
+
+    if (dist < final_direct_accept_radius_) {
+      sp.pose.pose.position.x = gx;
+      sp.pose.pose.position.y = gy;
+      sp.pose.pose.position.z = gz;
+      sp.pose.pose.orientation = yawToQuat(current_yaw_);
+      sp.twist.twist.linear.x = 0.0;
+      sp.twist.twist.linear.y = 0.0;
+      sp.twist.twist.linear.z = 0.0;
+      sp.twist.twist.angular.x = 0.0;
+      sp.twist.twist.angular.y = 0.0;
+      sp.twist.twist.angular.z = 0.0;
+      return true;
+    }
+
+    const double ux = dx / std::max(dist, 1e-6);
+    const double uy = dy / std::max(dist, 1e-6);
+    const double uz = dz / std::max(dist, 1e-6);
+    const double step = std::min(lookahead_dist_, dist);
+
+    sp.pose.pose.position.x = current_x_ + ux * step;
+    sp.pose.pose.position.y = current_y_ + uy * step;
+    sp.pose.pose.position.z = current_z_ + uz * step;
+    current_yaw_ = slewYaw(std::atan2(uy, ux));
+    sp.pose.pose.orientation = yawToQuat(current_yaw_);
+
+    const double speed = std::min(avg_speed_, dist / 1.0);
+    sp.twist.twist.linear.x = ux * speed;
+    sp.twist.twist.linear.y = uy * speed;
+    sp.twist.twist.linear.z = uz * speed;
+    sp.twist.twist.angular.x = 0.0;
+    sp.twist.twist.angular.y = 0.0;
+    sp.twist.twist.angular.z = 0.0;
+    return true;
+  }
+
+  bool isPlannerPathMeaningfullyChanged(
+    const std::vector<double>& new_x,
+    const std::vector<double>& new_y) {
+    if (new_x.empty()) return false;
+
+    if (last_path_x_.size() != new_x.size()) return true;
 
     double max_shift = 0.0;
-    for (size_t i = 0; i < msg->poses.size(); ++i) {
-        double dx = msg->poses[i].pose.position.x - last_path_x_[i];
-        double dy = msg->poses[i].pose.position.y - last_path_y_[i];
+    for (size_t i = 0; i < new_x.size(); ++i) {
+        double dx = new_x[i] - last_path_x_[i];
+        double dy = new_y[i] - last_path_y_[i];
         max_shift = std::max(max_shift, std::hypot(dx, dy));
     }
 
-    return max_shift > 0.5;  // 0.5m 이상 바뀐 경우만 새 경로로 인정함
+    return max_shift > planner_path_change_threshold_m_;
   }
 
   void plannerPathCallback(const nav_msgs::msg::Path::SharedPtr msg) {
       if (msg->poses.size() < 2) return;
 
+      std::vector<double> new_x;
+      std::vector<double> new_y;
+      std::vector<double> new_z;
+
+      for (const auto& ps : msg->poses) {
+          const double px = ps.pose.position.x;
+          const double py = ps.pose.position.y;
+          const double pz = ps.pose.position.z;
+          const double dist_from_current = std::hypot(px - current_x_, py - current_y_, pz - current_z_);
+
+          // planner path의 첫 점들은 현재 grid cell 주변이라 guidance에 넣으면
+          // 드론이 이미 지난 점으로 되돌아가려는 reference가 생길 수 있음.
+          if (have_odom_ && dist_from_current < planner_path_prune_radius_m_ &&
+              (&ps != &msg->poses.back())) {
+              continue;
+          }
+
+          new_x.push_back(px);
+          new_y.push_back(py);
+          new_z.push_back(pz);
+      }
+
+      if (new_x.size() < 2) {
+          const auto& goal = msg->poses.back().pose.position;
+          new_x = {current_x_, goal.x};
+          new_y = {current_y_, goal.y};
+          new_z = {current_z_, goal.z};
+      }
+
       // 경로 형상이 실질적으로 안 바뀌었으면 재생성 안 함
-      if (!isPlannerPathMeaningfullyChanged(msg) && !wp_x_.empty()) {
+      if (!isPlannerPathMeaningfullyChanged(new_x, new_y) && !wp_x_.empty()) {
           return;
       }
 
-      double new_gx = msg->poses.back().pose.position.x;
-      double new_gy = msg->poses.back().pose.position.y;
+      double new_gx = new_x.back();
+      double new_gy = new_y.back();
+      const bool goal_changed =
+        !std::isfinite(planner_goal_x_) ||
+        std::hypot(new_gx - planner_goal_x_, new_gy - planner_goal_y_) >
+          planner_goal_change_threshold_m_;
+
+      const rclcpp::Time now = this->now();
+      if (have_last_planner_retrajectory_time_ && !goal_changed &&
+          (now - last_planner_retrajectory_time_).seconds() < planner_retrajectory_min_interval_s_) {
+          RCLCPP_DEBUG(this->get_logger(),
+              "[Guidance] planner path 변경이 너무 잦아 trajectory 재생성 보류");
+          return;
+      }
 
       planner_goal_x_ = new_gx;
       planner_goal_y_ = new_gy;
@@ -136,20 +264,24 @@ private:
       last_path_x_.clear();
       last_path_y_.clear();
 
-      for (const auto& ps : msg->poses) {
-          wp_x_.push_back(ps.pose.position.x);
-          wp_y_.push_back(ps.pose.position.y);
-          wp_z_.push_back(ps.pose.position.z);
+      for (size_t i = 0; i < new_x.size(); ++i) {
+          wp_x_.push_back(new_x[i]);
+          wp_y_.push_back(new_y[i]);
+          wp_z_.push_back(new_z[i]);
 
-          last_path_x_.push_back(ps.pose.position.x);
-          last_path_y_.push_back(ps.pose.position.y);
+          last_path_x_.push_back(new_x[i]);
+          last_path_y_.push_back(new_y[i]);
       }
 
       if (have_odom_ && guidance_mode_ == "multi_snap") {
           generateMultiSegmentTrajectory();
+          last_planner_retrajectory_time_ = now;
+          have_last_planner_retrajectory_time_ = true;
           RCLCPP_INFO_THROTTLE(
               this->get_logger(), *this->get_clock(), 1000,
-              "[Guidance] planner path 변경 감지, trajectory 재생성 (%zu wp)", wp_x_.size());
+              "[Guidance] planner path 변경 감지, trajectory 재생성 (%zu wp, start=(%.2f, %.2f, %.2f), goal=(%.2f, %.2f, %.2f))",
+              wp_x_.size(), wp_x_.front(), wp_y_.front(), wp_z_.front(),
+              wp_x_.back(), wp_y_.back(), wp_z_.back());
       }
   }
 
@@ -460,7 +592,8 @@ void publishTrajectoryPreview(double t_now) {
       sp.pose.pose.position.y = spy;
       sp.pose.pose.position.z = spz;
       
-      sp.pose.pose.orientation = yawToQuat(std::atan2(spy - current_y_, spx - current_x_)); // 진행 방향 바라보기
+      current_yaw_ = slewYaw(std::atan2(spy - current_y_, spx - current_x_));
+      sp.pose.pose.orientation = yawToQuat(current_yaw_); // 진행 방향 바라보기
 
       // Z축을 포함하여 방향 벡터 기반으로 피드포워드 속도 인가함
       // (dx / dist)가 단위 벡터
@@ -491,7 +624,7 @@ void publishTrajectoryPreview(double t_now) {
         sp.pose.pose.position.z = spz; // Z축 목표 위치 업데이트함
         
         // 속도 벡터를 이용해 기체가 가야 할 방향(Yaw) 부드럽게 계산 (Yaw는 주로 XY 평면 기준으로 계산 유지)
-        current_yaw_ = (std::hypot(vx, vy) > 0.05) ? std::atan2(vy, vx) : current_yaw_;
+        current_yaw_ = (std::hypot(vx, vy) > 0.05) ? slewYaw(std::atan2(vy, vx)) : current_yaw_;
         sp.pose.pose.orientation = yawToQuat(current_yaw_);
 
         // 다항식에서 계산된 3D 정답 속도를 피드포워드로 바로 넘김
@@ -524,7 +657,10 @@ void publishTrajectoryPreview(double t_now) {
     // [수정됨] XY는 다항식 적용, Z축은 수학적 오버슈트 방지를 위해 선형 보간 적용함
     // ==========================================
     else if (guidance_mode_ == "multi_snap") {
-      if (is_trajectory_active_) {
+      if (shouldUseDirectGoalGuidance()) {
+        fillDirectGoalSetpoint(sp);
+      }
+      else if (is_trajectory_active_) {
         double t = (this->now() - segment_start_time_).seconds();
 
         // [Reference Preview] MPC가 사용할 미래 궤적을 100ms마다 퍼블리시
@@ -572,8 +708,15 @@ void publishTrajectoryPreview(double t_now) {
         
         double ax = (vx_next - vx) / 0.001;
         double ay = (vy_next - vy) / 0.001;
+
+        const double acc_xy = std::hypot(ax, ay);
+        if (reference_acc_limit_xy_ > 0.0 && acc_xy > reference_acc_limit_xy_) {
+          const double scale = reference_acc_limit_xy_ / acc_xy;
+          ax *= scale;
+          ay *= scale;
+        }
         
-        current_yaw_ = (std::hypot(vx, vy) > 0.05) ? std::atan2(vy, vx) : current_yaw_;
+        current_yaw_ = (std::hypot(vx, vy) > 0.05) ? slewYaw(std::atan2(vy, vx)) : current_yaw_;
         sp.pose.pose.orientation = yawToQuat(current_yaw_);
 
         // 다항식 속도(XY)와 선형 보간 속도(Z) 융합해서 피드포워드 인가함
@@ -605,6 +748,28 @@ void publishTrajectoryPreview(double t_now) {
     }
     // 최종적으로 계산된 "가야 할 곳(Setpoint) 및 목표 속도/가속도"를 발행하여 제어기로 전달
     setpoint_pub_->publish(sp);
+
+    if (reference_log_enabled_) {
+      const auto& p_ref = sp.pose.pose.position;
+      const auto& v_ref = sp.twist.twist.linear;
+      const auto& a_ref = sp.twist.twist.angular;
+      const double e_ref = std::hypot(
+        p_ref.x - current_x_,
+        p_ref.y - current_y_,
+        p_ref.z - current_z_);
+      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), reference_log_period_ms_,
+        "[Guidance Ref] mode=%s active=%s wp=%zu/%zu cur=(%.2f, %.2f, %.2f) ref_p=(%.2f, %.2f, %.2f) ref_v=(%.2f, %.2f, %.2f) ref_a=(%.2f, %.2f, %.2f) |p_ref-cur|=%.2fm goal=(%.2f, %.2f, %.2f)",
+        guidance_mode_.c_str(), is_trajectory_active_ ? "true" : "false",
+        wp_index_, wp_x_.empty() ? 0UL : wp_x_.size() - 1,
+        current_x_, current_y_, current_z_,
+        p_ref.x, p_ref.y, p_ref.z,
+        v_ref.x, v_ref.y, v_ref.z,
+        a_ref.x, a_ref.y, a_ref.z,
+        e_ref,
+        wp_x_.empty() ? 0.0 : wp_x_.back(),
+        wp_y_.empty() ? 0.0 : wp_y_.back(),
+        wp_z_.empty() ? 0.0 : wp_z_.back());
+    }
   }
 
 private:
@@ -621,7 +786,19 @@ private:
   std::vector<double> last_path_y_;
 
   bool use_planner_{false};
+  bool reference_log_enabled_{true};
+  int reference_log_period_ms_{1000};
+  double planner_path_change_threshold_m_{0.8};
+  double planner_retrajectory_min_interval_s_{1.5};
+  double planner_path_prune_radius_m_{1.0};
+  double planner_goal_change_threshold_m_{0.75};
+  double reference_acc_limit_xy_{3.0};
+  double max_yaw_rate_dps_{60.0};
+  int final_direct_guidance_wp_count_{3};
+  double final_direct_accept_radius_{0.35};
   double planner_goal_x_{1e9}, planner_goal_y_{1e9};
+  bool have_last_planner_retrajectory_time_{false};
+  rclcpp::Time last_planner_retrajectory_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;  
 
   // 궤적 생성기 인스턴스들 (Z축은 multi_snap에서 제외되어 사용 안 함)

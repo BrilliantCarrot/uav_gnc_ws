@@ -28,6 +28,12 @@ obj/
 .agents/
 .codex
 .idea/
+external/FAST_LIO_ROS2/
+external/livox_ros_driver2/
+external/livox_ros_driver2_stub/
+external/fast_lio2_build/
+external/fast_lio2_install/
+external/fast_lio2_log/
 *.user
 *.suo
 *.cache
@@ -39,3 +45,4 @@ obj/
 *.zip
 *.jpg
 __pycache__/
+AGENT_NOTES.md

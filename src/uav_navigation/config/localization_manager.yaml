@@ -1,0 +1,16 @@
+localization_manager_node:
+  ros__parameters:
+    # FAST-LIO/LIO-SAM or another LIO backend should publish this topic.
+    lio_odom_topic: "/lio/odom"
+    output_odom_topic: "/nav/odom"
+
+    expected_frame_id: "world"
+    output_frame_id: "world"
+    output_child_frame_id: "base_link"
+    require_expected_frame: false
+
+    max_source_age_sec: 0.25
+    max_pose_jump_m: 3.0
+    max_yaw_jump_rad: 1.2
+    max_position_covariance: 4.0
+    publish_stale_odom: false

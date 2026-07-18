@@ -35,6 +35,14 @@ add_executable(navigation_node
   src/navigation_node.cpp
 )
 
+add_executable(localization_manager_node
+  src/localization_manager_node.cpp
+)
+
+add_executable(lio_odom_test_source_node
+  src/lio_odom_test_source_node.cpp
+)
+
 target_include_directories(navigation_node PRIVATE
   ${EIGEN3_INCLUDE_DIRS}
 )
@@ -47,6 +55,14 @@ ament_target_dependencies(navigation_node
   rclcpp geometry_msgs nav_msgs sensor_msgs Eigen3
 )
 
+ament_target_dependencies(localization_manager_node
+  rclcpp nav_msgs
+)
+
+ament_target_dependencies(lio_odom_test_source_node
+  rclcpp nav_msgs
+)
+
 install(TARGETS
   uav_navigation_core
   EXPORT export_uav_navigation_core
@@ -57,6 +73,8 @@ install(TARGETS
 
 install(TARGETS
   navigation_node
+  localization_manager_node
+  lio_odom_test_source_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -1,0 +1,10 @@
+imu_lio_adapter_node:
+  ros__parameters:
+    input_topic: "/sim/imu"
+    output_topic: "/lio/imu"
+    output_frame_id: "imu"
+    preserve_input_frame: false
+
+    accel_noise_std: 0.05
+    gyro_noise_std: 0.005
+    orientation_covariance: 0.01

@@ -32,8 +32,13 @@ public:
     replan_rate_hz_ = this->declare_parameter<double>("replan_rate_hz", 2.0);
     use_dynamic_occupancy_ = this->declare_parameter<bool>("use_dynamic_occupancy", true);
     replan_on_map_change_ = this->declare_parameter<bool>("replan_on_map_change", true);
+    replan_on_start_move_ = this->declare_parameter<bool>("replan_on_start_move", false);
     replan_on_start_move_m_ = this->declare_parameter<double>("replan_on_start_move_m", 0.5);
     occupancy_threshold_ = this->declare_parameter<int>("occupancy_threshold", 50);
+    min_changed_cells_for_replan_ =
+      this->declare_parameter<int>("min_changed_cells_for_replan", 4);
+    map_replan_cooldown_s_ =
+      this->declare_parameter<double>("map_replan_cooldown_s", 1.5);
 
     const auto obs_x = this->declare_parameter<std::vector<double>>(
     "obstacle_x", std::vector<double>{});
@@ -146,9 +151,24 @@ private:
     }
 
     if (changed_cells > 0 && replan_on_map_change_) {
-      need_replan_ = true;
-      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-        "[Planner] occupancy 변화 감지: changed_cells=%zu", changed_cells);
+      const rclcpp::Time now = this->get_clock()->now();
+      const bool enough_cells =
+        changed_cells >= static_cast<size_t>(std::max(1, min_changed_cells_for_replan_));
+      const bool cooldown_ok =
+        !has_last_map_replan_time_ ||
+        (now - last_map_replan_time_).seconds() >= map_replan_cooldown_s_;
+
+      if (enough_cells && cooldown_ok) {
+        need_replan_ = true;
+        last_map_replan_time_ = now;
+        has_last_map_replan_time_ = true;
+        RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+          "[Planner] occupancy 변화 감지: changed_cells=%zu -> replan", changed_cells);
+      } else {
+        RCLCPP_DEBUG(this->get_logger(),
+          "[Planner] 작은 occupancy 변화 무시: changed_cells=%zu min=%d cooldown_ok=%s",
+          changed_cells, min_changed_cells_for_replan_, cooldown_ok ? "true" : "false");
+      }
     }
   }
 
@@ -161,7 +181,9 @@ private:
     dstar_.setStart(cur_x_, cur_y_);
 
     const double moved_dist = std::hypot(cur_x_ - last_plan_x_, cur_y_ - last_plan_y_);
-    const bool start_moved = !has_last_plan_start_ || moved_dist >= replan_on_start_move_m_;
+    const bool start_moved =
+      !has_last_plan_start_ ||
+      (replan_on_start_move_ && moved_dist >= replan_on_start_move_m_);
 
     if (!need_replan_ && !start_moved) {
       return;
@@ -338,13 +360,18 @@ private:
   double replan_rate_hz_{2.0};
   bool use_dynamic_occupancy_{true};
   bool replan_on_map_change_{true};
+  bool replan_on_start_move_{false};
   double replan_on_start_move_m_{0.5};
   int occupancy_threshold_{50};
+  int min_changed_cells_for_replan_{4};
+  double map_replan_cooldown_s_{1.5};
 
   bool need_replan_{true};
   bool has_last_plan_start_{false};
+  bool has_last_map_replan_time_{false};
   double last_plan_x_{0.0};
   double last_plan_y_{0.0};
+  rclcpp::Time last_map_replan_time_{0, 0, RCL_ROS_TIME};
 
   std::vector<bool> static_occ_;
   std::vector<bool> dynamic_occ_;

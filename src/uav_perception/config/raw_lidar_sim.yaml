@@ -1,0 +1,33 @@
+raw_lidar_sim_node:
+  ros__parameters:
+    # This node uses /sim/odom only inside the simulator to synthesize a raw LiDAR scan.
+    # The published cloud is expressed in the LiDAR sensor frame, not in world frame.
+    truth_odom_topic: "/sim/odom"
+    output_topic: "/lidar/points_raw"
+    frame_id: "lidar"
+
+    publish_rate_hz: 10.0
+    range_min_m: 0.5
+    range_max_m: 15.0
+    range_noise_std_m: 0.01
+
+    horizontal_fov_deg: 360.0
+    vertical_fov_deg: 30.0
+    horizontal_samples: 360
+    vertical_samples: 16
+
+    # LiDAR extrinsic relative to base_link/body frame.
+    lidar_x_body_m: 0.0
+    lidar_y_body_m: 0.0
+    lidar_z_body_m: 0.05
+    lidar_roll_body_rad: 0.0
+    lidar_pitch_body_rad: 0.0
+    lidar_yaw_body_rad: 0.0
+
+    obstacle_base_z: 0.0
+    obstacle_height: 3.0
+    obstacle_x: [3.0, 0.0, -1.5]
+    obstacle_y: [1.0, 5.0, 3.0]
+    obstacle_r: [1.0, 1.0, 0.8]
+
+    random_seed: 11
