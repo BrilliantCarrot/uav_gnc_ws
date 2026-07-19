@@ -1,0 +1,7 @@
+gymnasium
+stable-baselines3
+tensorboard
+
+# Optional: required only when train_uav_ppo is run with --progress-bar.
+tqdm
+rich

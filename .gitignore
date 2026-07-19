@@ -34,6 +34,7 @@ external/livox_ros_driver2_stub/
 external/fast_lio2_build/
 external/fast_lio2_install/
 external/fast_lio2_log/
+/rl_runs/*
 *.user
 *.suo
 *.cache
