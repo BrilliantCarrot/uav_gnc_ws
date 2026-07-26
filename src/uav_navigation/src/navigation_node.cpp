@@ -191,10 +191,6 @@ private:
       msg->angular_velocity.y,
       msg->angular_velocity.z);
 
-    // control_node가 angular velocity를 사용할 수 있도록 최신 gyro를 보관함.
-    // 현재 EKF/UKF 상태에서 bias-corrected gyro를 꺼내는 구조가 아니므로 raw gyro를 사용함.
-    current_gyro_ = gyro;
-
     // ------------------------------------------------------------
     // Prediction step
     // ------------------------------------------------------------
@@ -205,6 +201,11 @@ private:
     } else {
       ekf_.predict(acc, gyro, dt);
     }
+
+    // control_node의 자세 D항에는 body angular velocity가 필요함.
+    // raw gyro에는 sensor bias가 포함되므로, 필터가 추정한 gyro bias를 빼서
+    // bias-corrected angular velocity를 /nav/odom.twist.angular에 전달함.
+    current_angular_velocity_ = gyro - getCurrentGyroBias();
 
     // prediction 결과를 /nav/odom으로 발행함.
     publishOdometry(msg->header.stamp);
@@ -373,6 +374,15 @@ private:
     return ekf_.getPosition();
   }
 
+  Eigen::Vector3d getCurrentGyroBias() const
+  {
+    // 현재 활성화된 필터에서 gyro bias 추정치를 꺼내는 helper 함수임.
+    if (use_ukf_) {
+      return ukf_.getGyroBias();
+    }
+    return ekf_.getGyroBias();
+  }
+
   bool isFiniteVector(const Eigen::Vector3d& v) const
   {
     // NaN/Inf 방어용 helper 함수임.
@@ -448,21 +458,23 @@ private:
     odom.twist.twist.linear.y = v.y();
     odom.twist.twist.linear.z = v.z();
 
-    // EKF/UKF 상태에서 angular velocity를 따로 추정하지 않으므로,
-    // 가장 최근 IMU gyro 값을 그대로 넣음.
-    odom.twist.twist.angular.x = current_gyro_.x();
-    odom.twist.twist.angular.y = current_gyro_.y();
-    odom.twist.twist.angular.z = current_gyro_.z();
+    // EKF/UKF 상태는 angular velocity 자체를 직접 상태로 갖지는 않음.
+    // 대신 최신 IMU gyro에서 추정 gyro bias를 뺀 body angular velocity를 넣어
+    // control_node의 자세 D-gain damping이 bias에 덜 민감하게 동작하도록 함.
+    odom.twist.twist.angular.x = current_angular_velocity_.x();
+    odom.twist.twist.angular.y = current_angular_velocity_.y();
+    odom.twist.twist.angular.z = current_angular_velocity_.z();
 
     odom_pub_->publish(odom);
 
     if (state_log_enabled_) {
       RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), state_log_period_ms_,
-        "[Nav State] filter=%s p=(%.2f, %.2f, %.2f)m v=(%.2f, %.2f, %.2f)m/s gyro=(%.2f, %.2f, %.2f)rad/s gps=%s lidar=%s",
+        "[Nav State] filter=%s p=(%.2f, %.2f, %.2f)m v=(%.2f, %.2f, %.2f)m/s w_body=(%.2f, %.2f, %.2f)rad/s gyro_bias=(%.4f, %.4f, %.4f)rad/s gps=%s lidar=%s",
         use_ukf_ ? "UKF" : "EKF",
         p.x(), p.y(), p.z(),
         v.x(), v.y(), v.z(),
-        current_gyro_.x(), current_gyro_.y(), current_gyro_.z(),
+        current_angular_velocity_.x(), current_angular_velocity_.y(), current_angular_velocity_.z(),
+        getCurrentGyroBias().x(), getCurrentGyroBias().y(), getCurrentGyroBias().z(),
         use_gps_update_ ? "on" : "off",
         use_lidar_update_ ? "on" : "off");
     }
@@ -489,8 +501,8 @@ private:
   // dt 계산용 이전 timestamp
   rclcpp::Time last_time_{0, 0, RCL_ROS_TIME};
 
-  // /nav/odom twist.angular에 넣을 최신 gyro 값
-  Eigen::Vector3d current_gyro_{0.0, 0.0, 0.0};
+  // /nav/odom twist.angular에 넣을 최신 bias-corrected body angular velocity
+  Eigen::Vector3d current_angular_velocity_{0.0, 0.0, 0.0};
 
   // topic 이름 저장 변수
   std::string imu_topic_;

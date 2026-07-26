@@ -100,3 +100,29 @@ private:
     // 각 구간별 소요 시간을 기억해두는 리스트
     std::vector<double> times_; 
 };
+
+
+// ======================================================================
+// 4. QpMinSnapTrajectory (QP 기반 다중 구간 최소 스냅 궤적 생성기)
+// 목적: snap 비용 ∫(p''''(t))^2 dt를 직접 최소화하는 정석적인 minimum snap 구조
+// 구현: 외부 QP solver 없이 equality-constrained QP의 KKT 선형계를 Eigen으로 풂
+// ======================================================================
+class QpMinSnapTrajectory {
+public:
+    QpMinSnapTrajectory();
+
+    void generate(const std::vector<double>& waypoints, const std::vector<double>& times);
+    double getPosition(double t) const;
+    double getVelocity(double t) const;
+    double getTotalTime() const;
+
+private:
+    static double derivativeCoeff(int power, int derivative_order);
+    void fillDerivativeRow(Eigen::MatrixXd& A, int row, int segment, double t,
+                           int derivative_order, double sign) const;
+    int getSegmentIndex(double t) const;
+    double getStartTime(int idx) const;
+
+    Eigen::VectorXd coeffs_;
+    std::vector<double> times_;
+};

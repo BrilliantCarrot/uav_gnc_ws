@@ -34,6 +34,7 @@ public:
     
     // 어떤 유도 알고리즘을 쓸지 결정하는 스위치
     guidance_mode_ = this->declare_parameter<std::string>("guidance_mode", "multi_snap");
+    multi_snap_solver_ = this->declare_parameter<std::string>("multi_snap_solver", "qp");
 
     // 웨이포인트(목표점) 리스트
     wp_x_ = this->declare_parameter<std::vector<double>>("waypoints_x", std::vector<double>{0.0});
@@ -108,7 +109,8 @@ public:
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),
       std::bind(&GuidanceNode::onTimer, this));
 
-    RCLCPP_INFO(this->get_logger(), "Guidance Mode: [%s], 3D Waypoints Loaded.", guidance_mode_.c_str());
+    RCLCPP_INFO(this->get_logger(), "Guidance Mode: [%s], multi_snap_solver=[%s], 3D Waypoints Loaded.",
+                guidance_mode_.c_str(), multi_snap_solver_.c_str());
   }
 
 private:
@@ -117,6 +119,30 @@ private:
     geometry_msgs::msg::Quaternion q;
     q.w = std::cos(yaw * 0.5); q.x = 0.0; q.y = 0.0; q.z = std::sin(yaw * 0.5);
     return q;
+  }
+
+  bool useQpMinSnap() const {
+    return multi_snap_solver_ == "qp" || multi_snap_solver_ == "qp_min_snap";
+  }
+
+  double multiSnapXPosition(double t) const {
+    return useQpMinSnap() ? qp_snap_x_.getPosition(t) : multi_snap_x_.getPosition(t);
+  }
+
+  double multiSnapYPosition(double t) const {
+    return useQpMinSnap() ? qp_snap_y_.getPosition(t) : multi_snap_y_.getPosition(t);
+  }
+
+  double multiSnapXVelocity(double t) const {
+    return useQpMinSnap() ? qp_snap_x_.getVelocity(t) : multi_snap_x_.getVelocity(t);
+  }
+
+  double multiSnapYVelocity(double t) const {
+    return useQpMinSnap() ? qp_snap_y_.getVelocity(t) : multi_snap_y_.getVelocity(t);
+  }
+
+  double multiSnapTotalTime() const {
+    return useQpMinSnap() ? qp_snap_x_.getTotalTime() : multi_snap_x_.getTotalTime();
   }
 
   static double wrapAngle(double a) {
@@ -385,10 +411,16 @@ private:
 
     if (times.empty()) return;
 
-    // 수학 엔진(trajectory.cpp)에 배열을 통째로 넘겨서 3D 행렬 방정식을 품 (Z축 제외)
-    // 모든 구간의 연결점에서 속도, 가속도, jerk, snap이 연속되도록 하는 8N x 8N 행렬 방정식을 품
-    multi_snap_x_.generate(full_wp_x, times);
-    multi_snap_y_.generate(full_wp_y, times);
+    // 수학 엔진(trajectory.cpp)에 배열을 통째로 넘겨서 XY 궤적 계수를 계산함.
+    // multi_snap_solver="qp": snap 비용을 직접 최소화하는 KKT 기반 QP minimum snap
+    // multi_snap_solver="continuity": 기존 연속 조건 기반 7차 다항식
+    if (useQpMinSnap()) {
+      qp_snap_x_.generate(full_wp_x, times);
+      qp_snap_y_.generate(full_wp_y, times);
+    } else {
+      multi_snap_x_.generate(full_wp_x, times);
+      multi_snap_y_.generate(full_wp_y, times);
+    }
     
     // [중요 수정] Z축은 다항식으로 풀지 않고 제외함 (Runge's Phenomenon/오버슈트 방지)
     // multi_snap_z_.generate(full_wp_z, times); // <--- 이 부분 주석 처리됨
@@ -399,7 +431,7 @@ private:
 
     segment_start_time_ = this->now();
     is_trajectory_active_ = true;
-    total_multi_T_ = multi_snap_x_.getTotalTime(); // 총 비행시간 기록
+    total_multi_T_ = multiSnapTotalTime(); // 총 비행시간 기록
   }
 
 // ======================================================================
@@ -480,10 +512,10 @@ void publishTrajectoryPreview(double t_now) {
             // MultiMinSnapTrajectory 객체로, 전체 구간의 다항식 계수를 저장하고 있음.
             // getPosition(t): 해당 시간에 속하는 구간의 다항식 p(t) 계산
             // getVelocity(t): 해당 시간에 속하는 구간의 dp/dt(t) 계산
-            px = multi_snap_x_.getPosition(t_k);
-            py = multi_snap_y_.getPosition(t_k);
-            vx = multi_snap_x_.getVelocity(t_k);
-            vy = multi_snap_y_.getVelocity(t_k);
+            px = multiSnapXPosition(t_k);
+            py = multiSnapYPosition(t_k);
+            vx = multiSnapXVelocity(t_k);
+            vy = multiSnapYVelocity(t_k);
 
             // Z축 위치/속도: 선형 보간 (Linear Interpolation)
             // ※ Z축을 다항식이 아닌 선형 보간으로 처리하는 이유:
@@ -668,8 +700,8 @@ void publishTrajectoryPreview(double t_now) {
         publishTrajectoryPreview(t);
         
         // 1. XY 위치 타겟 설정함 (다항식 기반)
-        sp.pose.pose.position.x = multi_snap_x_.getPosition(t);
-        sp.pose.pose.position.y = multi_snap_y_.getPosition(t);
+        sp.pose.pose.position.x = multiSnapXPosition(t);
+        sp.pose.pose.position.y = multiSnapYPosition(t);
         
         // 2. Z축 위치 타겟 설정함 (선형 보간 - Linear Interpolation)
         // 현재 시간 t가 전체 구간 중 몇 번째 구간(idx)에 속하는지 탐색함
@@ -699,12 +731,12 @@ void publishTrajectoryPreview(double t_now) {
         sp.pose.pose.position.z = spz; // 보간된 Z축 위치 적용함
 
         // 3. 속도 및 가속도 타겟 설정함 (XY축 다항식 기반)
-        double vx = multi_snap_x_.getVelocity(t);
-        double vy = multi_snap_y_.getVelocity(t);
+        double vx = multiSnapXVelocity(t);
+        double vy = multiSnapYVelocity(t);
 
         // 0.001초 뒤의 속도를 구해 수치미분으로 정확한 XY 목표 가속도 획득함
-        double vx_next = multi_snap_x_.getVelocity(t + 0.001);
-        double vy_next = multi_snap_y_.getVelocity(t + 0.001);
+        double vx_next = multiSnapXVelocity(t + 0.001);
+        double vy_next = multiSnapYVelocity(t + 0.001);
         
         double ax = (vx_next - vx) / 0.001;
         double ay = (vy_next - vy) / 0.001;
@@ -774,6 +806,7 @@ void publishTrajectoryPreview(double t_now) {
 
 private:
   std::string guidance_mode_{"multi_snap"};
+  std::string multi_snap_solver_{"qp"};
   bool use_nav_odom_{true}, hold_last_{true}, have_odom_{false};
   std::string setpoint_topic_, nav_odom_topic_, sim_odom_topic_, last_frame_id_;
   double rate_hz_{20.0}, accept_radius_{0.5}, lookahead_dist_{1.5}, avg_speed_{1.0};
@@ -805,6 +838,7 @@ private:
   MinJerkTrajectory jerk_x_, jerk_y_, jerk_z_;
   MinSnapTrajectory snap_x_, snap_y_, snap_z_;
   MultiMinSnapTrajectory multi_snap_x_, multi_snap_y_, multi_snap_z_; 
+  QpMinSnapTrajectory qp_snap_x_, qp_snap_y_;
   
   // [추가됨] Z축 선형 보간을 위해 시간과 위치 정보를 보관하는 전역 벡터
   std::vector<double> multi_times_; // 각 구간별 할당 시간 저장용

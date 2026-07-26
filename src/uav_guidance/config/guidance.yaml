@@ -10,6 +10,10 @@ guidance_node:
 
     # 모드 설정 파라미터 ("lookahead" or "min_jerk" or "min_snap" or "multi_snap")
     guidance_mode: "multi_snap" 
+    # multi_snap_solver:
+    #   qp         - snap 비용 ∫(p''''(t))^2 dt를 직접 최소화하는 KKT 기반 QP minimum snap
+    #   continuity - 기존 연속 조건 기반 7차 다항식 방식
+    multi_snap_solver: "qp"
     
     # 뾰족한 모서리를 잘라내고 진입/진출점을 명시하여 '둥근 사각형' 유도 (칠각형) + 3D 고도 추가
     waypoints_x: [0.0, 4.0, 6.0, 6.0, 4.0, 0.0, -2.0, -2.0, 0.0]

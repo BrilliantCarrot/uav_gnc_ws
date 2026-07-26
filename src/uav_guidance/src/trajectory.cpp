@@ -323,3 +323,160 @@ double MultiMinSnapTrajectory::getStartTime(int idx) const {
     for (int i = 0; i < idx; ++i) start_t += times_[i];
     return start_t;
 }
+
+
+// ======================================================================
+// 4. QpMinSnapTrajectory 구현
+// minimize 0.5 * c^T H c
+// subject to Aeq * c = beq
+// KKT:
+// [H Aeq^T] [c]      [0]
+// [Aeq  0  ] [lambda] = [beq]
+// ======================================================================
+QpMinSnapTrajectory::QpMinSnapTrajectory() {}
+
+double QpMinSnapTrajectory::derivativeCoeff(int power, int derivative_order) {
+    if (power < derivative_order) return 0.0;
+    double coeff = 1.0;
+    for (int k = 0; k < derivative_order; ++k) {
+        coeff *= static_cast<double>(power - k);
+    }
+    return coeff;
+}
+
+void QpMinSnapTrajectory::fillDerivativeRow(
+    Eigen::MatrixXd& A, int row, int segment, double t,
+    int derivative_order, double sign) const {
+    const int base = segment * 8;
+    for (int power = derivative_order; power < 8; ++power) {
+        A(row, base + power) +=
+            sign * derivativeCoeff(power, derivative_order) * std::pow(t, power - derivative_order);
+    }
+}
+
+void QpMinSnapTrajectory::generate(
+    const std::vector<double>& waypoints, const std::vector<double>& times) {
+    const int N = static_cast<int>(times.size());
+    if (N == 0 || waypoints.size() != static_cast<size_t>(N + 1)) return;
+
+    const int num_vars = 8 * N;
+    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(num_vars, num_vars);
+
+    // H: 각 구간의 snap^2 적분 비용.
+    // p''''(t) = sum c_i * i(i-1)(i-2)(i-3)t^(i-4), i>=4
+    for (int seg = 0; seg < N; ++seg) {
+        const double T = times[seg];
+        const int base = seg * 8;
+        for (int i = 4; i < 8; ++i) {
+            for (int j = 4; j < 8; ++j) {
+                const double ci = derivativeCoeff(i, 4);
+                const double cj = derivativeCoeff(j, 4);
+                const int exponent = i + j - 7;
+                H(base + i, base + j) += ci * cj * std::pow(T, exponent) / exponent;
+            }
+        }
+    }
+
+    // 수치 안정화를 위한 아주 작은 regularization.
+    H += 1e-9 * Eigen::MatrixXd::Identity(num_vars, num_vars);
+
+    // 제약조건:
+    // start/end: p, v, a, jerk 고정
+    // 중간 waypoint: 앞 구간 끝/뒤 구간 시작 위치 고정
+    // 중간 연결점: v, a, jerk, snap 연속
+    const int num_constraints = 8 + 6 * (N - 1);
+    Eigen::MatrixXd Aeq = Eigen::MatrixXd::Zero(num_constraints, num_vars);
+    Eigen::VectorXd beq = Eigen::VectorXd::Zero(num_constraints);
+
+    int row = 0;
+
+    // 시작점 p/v/a/j = waypoint[0], 0, 0, 0
+    fillDerivativeRow(Aeq, row, 0, 0.0, 0, 1.0); beq(row++) = waypoints[0];
+    fillDerivativeRow(Aeq, row, 0, 0.0, 1, 1.0); beq(row++) = 0.0;
+    fillDerivativeRow(Aeq, row, 0, 0.0, 2, 1.0); beq(row++) = 0.0;
+    fillDerivativeRow(Aeq, row, 0, 0.0, 3, 1.0); beq(row++) = 0.0;
+
+    for (int seg = 0; seg < N - 1; ++seg) {
+        const double T = times[seg];
+
+        // 앞 구간 끝과 뒤 구간 시작이 같은 waypoint를 지나도록 함.
+        fillDerivativeRow(Aeq, row, seg, T, 0, 1.0);
+        beq(row++) = waypoints[seg + 1];
+
+        fillDerivativeRow(Aeq, row, seg + 1, 0.0, 0, 1.0);
+        beq(row++) = waypoints[seg + 1];
+
+        // 연결점에서 v/a/jerk/snap 연속.
+        for (int derivative_order = 1; derivative_order <= 4; ++derivative_order) {
+            fillDerivativeRow(Aeq, row, seg, T, derivative_order, 1.0);
+            fillDerivativeRow(Aeq, row, seg + 1, 0.0, derivative_order, -1.0);
+            beq(row++) = 0.0;
+        }
+    }
+
+    // 마지막점 p/v/a/j = waypoint[N], 0, 0, 0
+    const double T_end = times[N - 1];
+    const int last = N - 1;
+    fillDerivativeRow(Aeq, row, last, T_end, 0, 1.0); beq(row++) = waypoints[N];
+    fillDerivativeRow(Aeq, row, last, T_end, 1, 1.0); beq(row++) = 0.0;
+    fillDerivativeRow(Aeq, row, last, T_end, 2, 1.0); beq(row++) = 0.0;
+    fillDerivativeRow(Aeq, row, last, T_end, 3, 1.0); beq(row++) = 0.0;
+
+    Eigen::MatrixXd KKT = Eigen::MatrixXd::Zero(num_vars + num_constraints,
+                                                num_vars + num_constraints);
+    Eigen::VectorXd rhs = Eigen::VectorXd::Zero(num_vars + num_constraints);
+
+    KKT.block(0, 0, num_vars, num_vars) = H;
+    KKT.block(0, num_vars, num_vars, num_constraints) = Aeq.transpose();
+    KKT.block(num_vars, 0, num_constraints, num_vars) = Aeq;
+    rhs.segment(num_vars, num_constraints) = beq;
+
+    const Eigen::VectorXd solution = KKT.colPivHouseholderQr().solve(rhs);
+    coeffs_ = solution.head(num_vars);
+    times_ = times;
+}
+
+double QpMinSnapTrajectory::getPosition(double t) const {
+    if (times_.empty()) return 0.0;
+    const int idx = getSegmentIndex(t);
+    const double t_local = t - getStartTime(idx);
+    const int c = idx * 8;
+    double p = 0.0;
+    for (int i = 0; i < 8; ++i) {
+        p += coeffs_(c + i) * std::pow(t_local, i);
+    }
+    return p;
+}
+
+double QpMinSnapTrajectory::getVelocity(double t) const {
+    if (times_.empty()) return 0.0;
+    const int idx = getSegmentIndex(t);
+    const double t_local = t - getStartTime(idx);
+    const int c = idx * 8;
+    double v = 0.0;
+    for (int i = 1; i < 8; ++i) {
+        v += static_cast<double>(i) * coeffs_(c + i) * std::pow(t_local, i - 1);
+    }
+    return v;
+}
+
+double QpMinSnapTrajectory::getTotalTime() const {
+    double t = 0.0;
+    for (double dt : times_) t += dt;
+    return t;
+}
+
+int QpMinSnapTrajectory::getSegmentIndex(double t) const {
+    double accumulated_t = 0.0;
+    for (size_t i = 0; i < times_.size(); ++i) {
+        accumulated_t += times_[i];
+        if (t <= accumulated_t) return static_cast<int>(i);
+    }
+    return static_cast<int>(times_.size()) - 1;
+}
+
+double QpMinSnapTrajectory::getStartTime(int idx) const {
+    double start_t = 0.0;
+    for (int i = 0; i < idx; ++i) start_t += times_[i];
+    return start_t;
+}

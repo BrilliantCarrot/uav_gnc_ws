@@ -68,8 +68,11 @@ bool MultirotorModel::configure(const MultirotorConfig& config)
 
     config_ = config;
     rotor_thrusts_.assign(config_.rotors.size(), 0.0);
+    rotor_omegas_.assign(config_.rotors.size(), 0.0);
     debug_.thrust_cmd.assign(config_.rotors.size(), 0.0);
     debug_.thrust_actual.assign(config_.rotors.size(), 0.0);
+    debug_.omega_cmd.assign(config_.rotors.size(), 0.0);
+    debug_.omega_actual.assign(config_.rotors.size(), 0.0);
     configured_ = true;
     return true;
 }
@@ -77,11 +80,14 @@ bool MultirotorModel::configure(const MultirotorConfig& config)
 void MultirotorModel::reset()
 {
     std::fill(rotor_thrusts_.begin(), rotor_thrusts_.end(), 0.0);
+    std::fill(rotor_omegas_.begin(), rotor_omegas_.end(), 0.0);
     debug_.thrust_cmd = rotor_thrusts_;
     debug_.thrust_actual = rotor_thrusts_;
+    debug_.omega_cmd = rotor_omegas_;
+    debug_.omega_actual = rotor_omegas_;
 }
 
-Input MultirotorModel::update(const Input& desired_wrench, double dt)
+Input MultirotorModel::update(const Input& desired_wrench, double dt, double altitude_m)
 {
     if (!configured_) {
         return desired_wrench;
@@ -93,12 +99,32 @@ Input MultirotorModel::update(const Input& desired_wrench, double dt)
     const double tau = config_.motor_tau;
     const double alpha = (tau > 1e-6) ? clamp(dt / tau, 0.0, 1.0) : 1.0;
 
-    for (std::size_t i = 0; i < rotor_thrusts_.size(); ++i) {
-        rotor_thrusts_[i] += alpha * (thrust_cmd[i] - rotor_thrusts_[i]);
+    if (config_.use_rpm_propeller) {
+        const double kT = std::max(config_.prop_thrust_coeff, 1e-12);
+        const double omega_max = effectiveOmegaMax();
+
+        for (std::size_t i = 0; i < rotor_thrusts_.size(); ++i) {
+            const double clipped_thrust_cmd = clamp(
+                thrust_cmd[i], config_.rotors[i].thrust_min, config_.rotors[i].thrust_max);
+            const double omega_cmd = clamp(std::sqrt(clipped_thrust_cmd / kT), 0.0, omega_max);
+            rotor_omegas_[i] += alpha * (omega_cmd - rotor_omegas_[i]);
+            rotor_omegas_[i] = clamp(rotor_omegas_[i], 0.0, omega_max);
+            rotor_thrusts_[i] = clamp(kT * rotor_omegas_[i] * rotor_omegas_[i],
+                                      config_.rotors[i].thrust_min,
+                                      config_.rotors[i].thrust_max);
+            debug_.omega_cmd[i] = omega_cmd;
+        }
+    } else {
+        for (std::size_t i = 0; i < rotor_thrusts_.size(); ++i) {
+            rotor_thrusts_[i] += alpha * (thrust_cmd[i] - rotor_thrusts_[i]);
+            debug_.omega_cmd[i] = 0.0;
+            rotor_omegas_[i] = 0.0;
+        }
     }
 
     debug_.thrust_actual = rotor_thrusts_;
-    return rotorThrustsToWrench(rotor_thrusts_);
+    debug_.omega_actual = rotor_omegas_;
+    return rotorThrustsToWrench(rotor_thrusts_, altitude_m);
 }
 
 std::vector<double> MultirotorModel::allocateRotorThrusts(const Input& desired_wrench) const
@@ -156,25 +182,50 @@ std::vector<double> MultirotorModel::allocateRotorThrusts(const Input& desired_w
     return thrusts;
 }
 
-Input MultirotorModel::rotorThrustsToWrench(const std::vector<double>& rotor_thrusts) const
+Input MultirotorModel::rotorThrustsToWrench(
+    const std::vector<double>& rotor_thrusts, double altitude_m) const
 {
     Input out;
     out.thrust_body = {0.0, 0.0, 0.0};
     out.moment_body = {0.0, 0.0, 0.0};
 
+    const double ge = groundEffectFactor(altitude_m);
+
     for (std::size_t i = 0; i < rotor_thrusts.size(); ++i) {
         const RotorConfig& r = config_.rotors[i];
-        const Vec3 force_body{0.0, 0.0, rotor_thrusts[i]};
+        const double thrust = rotor_thrusts[i] * ge;
+        const Vec3 force_body{0.0, 0.0, thrust};
         const Vec3 arm_moment = Vec3::cross(r.position_body, force_body);
-        const Vec3 yaw_moment{
-            0.0,
-            0.0,
-            r.yaw_torque_sign * config_.yaw_torque_to_thrust * rotor_thrusts[i]
-        };
+        const double yaw_torque = config_.use_rpm_propeller
+            ? r.yaw_torque_sign * config_.prop_torque_coeff * rotor_omegas_[i] * rotor_omegas_[i] * ge
+            : r.yaw_torque_sign * config_.yaw_torque_to_thrust * thrust;
+        const Vec3 yaw_moment{0.0, 0.0, yaw_torque};
 
         out.thrust_body += force_body;
         out.moment_body += arm_moment + yaw_moment;
     }
 
     return out;
+}
+
+double MultirotorModel::groundEffectFactor(double altitude_m) const
+{
+    if (!config_.enable_ground_effect || config_.ground_effect_altitude_m <= 1e-6) {
+        return 1.0;
+    }
+
+    const double h = std::max(0.0, altitude_m);
+    if (h >= config_.ground_effect_altitude_m) {
+        return 1.0;
+    }
+
+    const double proximity = 1.0 - h / config_.ground_effect_altitude_m;
+    return 1.0 + std::max(0.0, config_.ground_effect_gain) * proximity * proximity;
+}
+
+double MultirotorModel::effectiveOmegaMax() const
+{
+    const double nominal = std::max(config_.battery_voltage_nominal, 1e-6);
+    const double voltage_scale = clamp(config_.battery_voltage / nominal, 0.0, 1.2);
+    return std::max(0.0, config_.motor_omega_max * voltage_scale);
 }

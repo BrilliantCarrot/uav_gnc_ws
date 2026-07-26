@@ -39,6 +39,13 @@ public:
     params_.use_drag = this->declare_parameter<bool>("use_drag", true);
     params_.k1 = this->declare_parameter<double>("k1", 0.15);
     params_.k2 = this->declare_parameter<double>("k2", 0.02);
+    enable_body_drag_ = this->declare_parameter<bool>("enable_body_drag", false);
+    body_drag_linear_ = parseVec3Param(
+      this->declare_parameter<std::vector<double>>("body_drag_linear", {0.0, 0.0, 0.0}),
+      "body_drag_linear");
+    body_drag_quadratic_ = parseVec3Param(
+      this->declare_parameter<std::vector<double>>("body_drag_quadratic", {0.0, 0.0, 0.0}),
+      "body_drag_quadratic");
 
     // robustness 테스트용 바람 외란 파라미터 불러오기
     params_.wind_force.x = this->declare_parameter<double>("wind_x", 0.0);
@@ -54,6 +61,23 @@ public:
     state_log_enabled_ = this->declare_parameter<bool>("state_log_enabled", true);
     state_log_period_ms_ = this->declare_parameter<int>("state_log_period_ms", 1000);
 
+    enable_imu_bias_ = this->declare_parameter<bool>("enable_imu_bias", false);
+    accel_bias_random_walk_std_ =
+      this->declare_parameter<double>("accel_bias_random_walk_std", 0.0);
+    gyro_bias_random_walk_std_ =
+      this->declare_parameter<double>("gyro_bias_random_walk_std", 0.0);
+
+    const auto accel_bias_body_param =
+      this->declare_parameter<std::vector<double>>("accel_bias_body", {0.0, 0.0, 0.0});
+    const auto gyro_bias_body_param =
+      this->declare_parameter<std::vector<double>>("gyro_bias_body", {0.0, 0.0, 0.0});
+
+    accel_bias_body_ = parseVec3Param(accel_bias_body_param, "accel_bias_body");
+    gyro_bias_body_ = parseVec3Param(gyro_bias_body_param, "gyro_bias_body");
+
+    if (accel_bias_random_walk_std_ < 0.0) accel_bias_random_walk_std_ = 0.0;
+    if (gyro_bias_random_walk_std_ < 0.0) gyro_bias_random_walk_std_ = 0.0;
+
     // [중요] 혹시 0.0이 들어오면 강제로 기본값 설정 (NaN 방지)
     if (n_acc <= 0) n_acc = 0.1;
     if (n_gyr <= 0) n_gyr = 0.01;
@@ -63,6 +87,7 @@ public:
     dist_acc_ = std::normal_distribution<double>(0.0, n_acc);
     dist_gyr_ = std::normal_distribution<double>(0.0, n_gyr);
     dist_gps_ = std::normal_distribution<double>(0.0, n_gps);
+    dist_unit_ = std::normal_distribution<double>(0.0, 1.0);
     
     // 시드값 초기화 (이거 없으면 랜덤 안 될 수도 있음)
     // std::random_device rd; // 헤더 필요: #include <random>
@@ -80,16 +105,19 @@ public:
     input_.moment_body = {0.0, 0.0, 0.0};
 
     actuator_mode_ = this->declare_parameter<std::string>("actuator_mode", "direct_wrench");
-    if (actuator_mode_ == "multirotor") {
+    if (actuator_mode_ == "multirotor" || actuator_mode_ == "rpm_propeller") {
       const MultirotorConfig config = loadMultirotorConfig();
-      if (!multirotor_.configure(config)) {
+      MultirotorConfig configured_config = config;
+      configured_config.use_rpm_propeller = (actuator_mode_ == "rpm_propeller");
+      if (!multirotor_.configure(configured_config)) {
         RCLCPP_WARN(this->get_logger(),
                     "Invalid multirotor config. Falling back to direct_wrench mode.");
         actuator_mode_ = "direct_wrench";
       } else {
         RCLCPP_INFO(this->get_logger(),
-                    "actuator mode: multirotor (%s, rotors=%zu, motor_tau=%.3f)",
-                    config.airframe_name.c_str(), config.rotors.size(), config.motor_tau);
+                    "actuator mode: %s (%s, rotors=%zu, motor_tau=%.3f)",
+                    actuator_mode_.c_str(), configured_config.airframe_name.c_str(),
+                    configured_config.rotors.size(), configured_config.motor_tau);
       }
     } else {
       actuator_mode_ = "direct_wrench";
@@ -123,6 +151,12 @@ public:
 
     // “dt_ 초마다 onTimer() 함수를 실행하는 타이머를 만듦
     RCLCPP_INFO(this->get_logger(), "simulation_node started (dt=%.4f)", dt_);
+    RCLCPP_INFO(this->get_logger(),
+      "IMU model: noise_acc=%.4f m/s^2, noise_gyr=%.5f rad/s, bias=%s, "
+      "accel_bias=(%.4f, %.4f, %.4f) m/s^2, gyro_bias=(%.5f, %.5f, %.5f) rad/s",
+      n_acc, n_gyr, enable_imu_bias_ ? "ON" : "OFF",
+      accel_bias_body_.x, accel_bias_body_.y, accel_bias_body_.z,
+      gyro_bias_body_.x, gyro_bias_body_.y, gyro_bias_body_.z);
     // SimNode() 생성자 맨 마지막 부분에 추가
     // RCLCPP_WARN(this->get_logger(), "=== SIM DEBUG ===");
     // RCLCPP_WARN(this->get_logger(), "Mass: %f", params_.mass);
@@ -131,6 +165,16 @@ public:
   }
 
 private:
+  Vec3 parseVec3Param(const std::vector<double>& values, const std::string& name) const
+  {
+    if (values.size() != 3) {
+      RCLCPP_WARN(this->get_logger(),
+        "%s must have exactly 3 values. Falling back to zeros.", name.c_str());
+      return {0.0, 0.0, 0.0};
+    }
+    return {values[0], values[1], values[2]};
+  }
+
   MultirotorConfig loadMultirotorConfig()
   {
     constexpr double inv_sqrt2 = 0.7071067811865475;
@@ -142,6 +186,18 @@ private:
     config.airframe_name = this->declare_parameter<std::string>("airframe_name", "f450_quad_x");
     config.motor_tau = this->declare_parameter<double>("motor_tau", 0.04);
     config.yaw_torque_to_thrust = this->declare_parameter<double>("yaw_torque_to_thrust", 0.016);
+    config.prop_thrust_coeff = this->declare_parameter<double>("prop_thrust_coeff", 1.8e-5);
+    config.prop_torque_coeff = this->declare_parameter<double>("prop_torque_coeff", 2.8e-7);
+    config.motor_omega_max = this->declare_parameter<double>("motor_omega_max", 900.0);
+    config.battery_voltage_nominal =
+      this->declare_parameter<double>("battery_voltage_nominal", 14.8);
+    config.battery_voltage = this->declare_parameter<double>("battery_voltage", 14.8);
+    config.enable_ground_effect =
+      this->declare_parameter<bool>("enable_ground_effect", false);
+    config.ground_effect_altitude_m =
+      this->declare_parameter<double>("ground_effect_altitude_m", 0.8);
+    config.ground_effect_gain =
+      this->declare_parameter<double>("ground_effect_gain", 0.12);
 
     const std::vector<std::string> default_names{
       "front_left", "front_right", "rear_right", "rear_left"
@@ -218,9 +274,13 @@ private:
     }
 
     Input applied_u = u_copy;
-    if (actuator_mode_ == "multirotor") {
-      applied_u = multirotor_.update(u_copy, dt_);
+    if (actuator_mode_ == "multirotor" || actuator_mode_ == "rpm_propeller") {
+      applied_u = multirotor_.update(u_copy, dt_, state_.p.z);
       publishActuatorDebug();
+    }
+
+    if (enable_body_drag_) {
+      applied_u.thrust_body += computeBodyDragForce(state_);
     }
 
     // ===== IMU 생성용: 현재 상태에서의 가속도/각속도 계산 =====
@@ -256,6 +316,8 @@ private:
     // "specific force"는 가속도에서 중력 가속도를 뺀 값으로, IMU의 가속도계가 측정하는 실제 가속도임.
     const Vec3 specific_force_world = accel_world_for_imu - gravity;
     const Vec3 accel_body = state_.q.rotateWorldToBody(specific_force_world);
+
+    updateImuBias();
 
     // Odometry publish
     nav_msgs::msg::Odometry odom; // 드론/로봇의 상태를 나타내는 표준 메시지 타입
@@ -315,14 +377,16 @@ private:
     // imu.linear_acceleration.x = accel_body.x;
     // imu.linear_acceleration.y = accel_body.y;
     // imu.linear_acceleration.z = accel_body.z;
-    // Gyro + Noise
-    imu.angular_velocity.x = state_.w.x + dist_gyr_(generator_);
-    imu.angular_velocity.y = state_.w.y + dist_gyr_(generator_);
-    imu.angular_velocity.z = state_.w.z + dist_gyr_(generator_);
-    // Accel + Noise
-    imu.linear_acceleration.x = accel_body.x + dist_acc_(generator_);
-    imu.linear_acceleration.y = accel_body.y + dist_acc_(generator_);
-    imu.linear_acceleration.z = accel_body.z + dist_acc_(generator_);
+    const Vec3 gyro_bias = enable_imu_bias_ ? gyro_bias_body_ : Vec3{0.0, 0.0, 0.0};
+    const Vec3 accel_bias = enable_imu_bias_ ? accel_bias_body_ : Vec3{0.0, 0.0, 0.0};
+
+    // IMU = true body-frame measurement + slowly varying bias + white noise.
+    imu.angular_velocity.x = state_.w.x + gyro_bias.x + dist_gyr_(generator_);
+    imu.angular_velocity.y = state_.w.y + gyro_bias.y + dist_gyr_(generator_);
+    imu.angular_velocity.z = state_.w.z + gyro_bias.z + dist_gyr_(generator_);
+    imu.linear_acceleration.x = accel_body.x + accel_bias.x + dist_acc_(generator_);
+    imu.linear_acceleration.y = accel_body.y + accel_bias.y + dist_acc_(generator_);
+    imu.linear_acceleration.z = accel_body.z + accel_bias.z + dist_acc_(generator_);
 
     imu_pub_->publish(imu);
 
@@ -345,10 +409,42 @@ private:
   {
     const ActuatorDebug& debug = multirotor_.debug();
     std_msgs::msg::Float64MultiArray msg;
-    msg.data.reserve(debug.thrust_cmd.size() + debug.thrust_actual.size());
+    msg.data.reserve(debug.thrust_cmd.size() + debug.thrust_actual.size() +
+                     debug.omega_cmd.size() + debug.omega_actual.size());
     msg.data.insert(msg.data.end(), debug.thrust_cmd.begin(), debug.thrust_cmd.end());
     msg.data.insert(msg.data.end(), debug.thrust_actual.begin(), debug.thrust_actual.end());
+    msg.data.insert(msg.data.end(), debug.omega_cmd.begin(), debug.omega_cmd.end());
+    msg.data.insert(msg.data.end(), debug.omega_actual.begin(), debug.omega_actual.end());
     actuator_pub_->publish(msg);
+  }
+
+  Vec3 computeBodyDragForce(const State& state) const
+  {
+    const Vec3 v_body = state.q.rotateWorldToBody(state.v);
+    return {
+      -body_drag_linear_.x * v_body.x - body_drag_quadratic_.x * std::abs(v_body.x) * v_body.x,
+      -body_drag_linear_.y * v_body.y - body_drag_quadratic_.y * std::abs(v_body.y) * v_body.y,
+      -body_drag_linear_.z * v_body.z - body_drag_quadratic_.z * std::abs(v_body.z) * v_body.z
+    };
+  }
+
+  void updateImuBias()
+  {
+    if (!enable_imu_bias_) {
+      return;
+    }
+
+    const double sqrt_dt = std::sqrt(std::max(dt_, 0.0));
+    if (accel_bias_random_walk_std_ > 0.0) {
+      accel_bias_body_.x += accel_bias_random_walk_std_ * sqrt_dt * dist_unit_(generator_);
+      accel_bias_body_.y += accel_bias_random_walk_std_ * sqrt_dt * dist_unit_(generator_);
+      accel_bias_body_.z += accel_bias_random_walk_std_ * sqrt_dt * dist_unit_(generator_);
+    }
+    if (gyro_bias_random_walk_std_ > 0.0) {
+      gyro_bias_body_.x += gyro_bias_random_walk_std_ * sqrt_dt * dist_unit_(generator_);
+      gyro_bias_body_.y += gyro_bias_random_walk_std_ * sqrt_dt * dist_unit_(generator_);
+      gyro_bias_body_.z += gyro_bias_random_walk_std_ * sqrt_dt * dist_unit_(generator_);
+    }
   }
 
 private:
@@ -361,6 +457,14 @@ private:
   bool ground_contact_imu_correction_{true};
   bool state_log_enabled_{true};
   int state_log_period_ms_{1000};
+  bool enable_body_drag_{false};
+  Vec3 body_drag_linear_{0.0, 0.0, 0.0};
+  Vec3 body_drag_quadratic_{0.0, 0.0, 0.0};
+  bool enable_imu_bias_{false};
+  Vec3 accel_bias_body_{0.0, 0.0, 0.0};
+  Vec3 gyro_bias_body_{0.0, 0.0, 0.0};
+  double accel_bias_random_walk_std_{0.0};
+  double gyro_bias_random_walk_std_{0.0};
   MultirotorModel multirotor_;
 
   std::mutex mtx_;
@@ -379,6 +483,7 @@ private:
   std::normal_distribution<double> dist_acc_;
   std::normal_distribution<double> dist_gyr_;
   std::normal_distribution<double> dist_gps_;
+  std::normal_distribution<double> dist_unit_;
 };
 
 int main(int argc, char** argv){

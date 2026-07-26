@@ -9,6 +9,11 @@ simulation_node:
     use_drag: true
     k1: 0.15
     k2: 0.02
+    # Body-frame anisotropic drag. 기존 world-frame 단순 drag에 더해,
+    # 기체 전후/좌우/상하 방향별 항력 차이를 모사함.
+    enable_body_drag: false
+    body_drag_linear: [0.02, 0.02, 0.04]       # N/(m/s), body x/y/z
+    body_drag_quadratic: [0.08, 0.08, 0.12]    # N/(m/s)^2, body x/y/z
     # ===== 강인함(robustness) 테스트용 악조건 테스트 파라미터 =====
     # 11 주차에서 테스트할 때 파라미터값들:
     # Case	wind_x	wind_y	noise_gps	      use_mpc	  목적
@@ -21,18 +26,44 @@ simulation_node:
     ground_contact_imu_correction: true
     state_log_enabled: true
     state_log_period_ms: 500
+
+    # ===== IMU sensor error model =====
+    # 측정값 = 실제 body-frame 값 + bias + white noise.
+    # bias는 실제 IMU처럼 전원을 켰을 때 남아있는 작은 offset이고,
+    # random walk는 온도/시간에 따라 bias가 아주 천천히 변하는 효과를 모사함.
+    # PX4 EKF2의 accel bias 초기 불확실성/limit보다 보수적으로 작은 값을 사용해
+    # 항법 필터가 bias 추정 구조를 실제로 쓰되, 기존 폐루프 비행 안정성을 크게 깨지 않게 함.
+    enable_imu_bias: true
+    accel_bias_body: [0.03, -0.02, 0.04]       # m/s^2, body-frame accelerometer bias
+    gyro_bias_body: [0.002, -0.0015, 0.001]    # rad/s, body-frame gyro bias
+    accel_bias_random_walk_std: 0.0003         # m/s^2/sqrt(s)
+    gyro_bias_random_walk_std: 0.00001         # rad/s/sqrt(s)
+
     wind_x: 0.0      # X 방향으로 지속적으로 미는 바람 (N)
     wind_y: 0.0     # Y 방향으로 지속적으로 미는 바람 (N)
 
     # ===== Actuator model =====
     # direct_wrench: 기존 방식. /control/wrench의 body force/moment를 sixdof에 바로 입력
     # multirotor: control allocator -> motor first-order dynamics -> rotor force/moment -> sixdof
+    # rpm_propeller: allocator -> motor omega command -> motor/ESC lag -> kT/kQ propeller thrust/torque
     actuator_mode: "direct_wrench"
 
     # F450 Quad-X airframe preset. actuator_mode를 "multirotor"로 바꾸면 아래 값을 사용함.
     airframe_name: "f450_quad_x"
     motor_tau: 0.04
     yaw_torque_to_thrust: 0.016
+    # ===== RPM-based propeller model, used when actuator_mode="rpm_propeller" =====
+    # T = kT * omega^2, Q = kQ * omega^2. omega unit: rad/s.
+    # 아래 값은 F450급 시뮬레이션 안정성을 위한 보수적 nominal 값이며,
+    # 실제 기체 수준으로 맞추려면 모터/프로펠러 데이터시트나 thrust stand 로그로 식별해야 함.
+    prop_thrust_coeff: 0.000018
+    prop_torque_coeff: 0.00000028
+    motor_omega_max: 900.0
+    battery_voltage_nominal: 14.8
+    battery_voltage: 14.8
+    enable_ground_effect: false
+    ground_effect_altitude_m: 0.8
+    ground_effect_gain: 0.12
     rotor_names: ["front_left", "front_right", "rear_right", "rear_left"]
     rotor_positions_body: [
        0.1591,  0.1591, 0.0,
