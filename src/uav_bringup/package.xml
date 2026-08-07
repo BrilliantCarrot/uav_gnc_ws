@@ -9,6 +9,12 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>rclcpp</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>ignition-msgs8</depend>
+  <depend>ignition-transport11</depend>
+
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>uav_dynamics</exec_depend>
@@ -19,6 +25,7 @@
   <exec_depend>uav_perception</exec_depend>
   <exec_depend>uav_evaluation</exec_depend>
   <exec_depend>uav_visualization</exec_depend>
+  <exec_depend>uav_px4_bridge</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
 
   <export>

@@ -103,10 +103,39 @@ Implemented:
 - Reward terms for progress, distance, smoothness, attitude rate, effort, crash, and success
 - PPO training and rollout scripts
 - CSV rollout export and 3D/2D trajectory plotting
+- ROS2 residual guidance deployment node for closed-loop integration validation
+
+## ROS2 GNC Integration Validation
+
+The default bringup still runs the classical GNC pipeline:
+
+```bash
+ros2 launch uav_bringup bringup.launch.py use_rl_guidance:=false
+```
+
+RL integration can be enabled without policy inference first. This passthrough
+mode routes `/guidance/setpoint` through `/guidance/setpoint_rl` and should match
+the baseline behavior before loading a model:
+
+```bash
+ros2 launch uav_bringup bringup.launch.py use_rl_guidance:=true
+```
+
+To validate a trained PPO model inside the ROS2 simulation, enable policy
+inference and pass the trained model path:
+
+```bash
+ros2 launch uav_bringup bringup.launch.py \
+  use_rl_guidance:=true \
+  rl_enable_policy:=true \
+  rl_model_path:=/home/lyj/uav_gnc_ws/rl_runs/uav_goal_ppo/final_model.zip
+```
+
+This is deployment/validation, not PPO training. ROS2-based reward, reset, and
+fine-tuning support is a later step.
 
 Planned:
 
-- ROS2 policy deployment node
 - PID/MPC/RL evaluation plots
 - obstacle-aware observation
 - multi-UAV environment

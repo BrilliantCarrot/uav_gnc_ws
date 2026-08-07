@@ -39,8 +39,8 @@ guidance_node:
     planner_retrajectory_min_interval_s: 1.5
     planner_path_prune_radius_m: 1.0
     planner_goal_change_threshold_m: 0.75
-    reference_acc_limit_xy: 3.0
-    max_yaw_rate_dps: 60.0
+    reference_acc_limit_xy: 2.0
+    max_yaw_rate_dps: 45.0
     # 마지막 짧은 구간에서 multi-snap 시작/종료 zero-velocity 조건 때문에 reference가 뒤로 휘는 것을 방지
     final_direct_guidance_wp_count: 3
     final_direct_accept_radius: 0.35

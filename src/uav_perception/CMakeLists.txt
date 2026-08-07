@@ -39,6 +39,10 @@ add_executable(imu_lio_adapter_node
   src/imu_lio_adapter_node.cpp
 )
 
+add_executable(gazebo_lidar_fastlio_adapter_node
+  src/gazebo_lidar_fastlio_adapter_node.cpp
+)
+
 add_executable(lidar_preprocess_node
   src/lidar_preprocess_node.cpp
 )
@@ -60,6 +64,10 @@ ament_target_dependencies(raw_lidar_sim_node
 )
 
 ament_target_dependencies(imu_lio_adapter_node
+  rclcpp sensor_msgs
+)
+
+ament_target_dependencies(gazebo_lidar_fastlio_adapter_node
   rclcpp sensor_msgs
 )
 
@@ -87,6 +95,7 @@ install(TARGETS
   virtual_lidar_node
   raw_lidar_sim_node
   imu_lio_adapter_node
+  gazebo_lidar_fastlio_adapter_node
   lidar_preprocess_node
   lidar_pose_correction_node
   occupancy_projection_node

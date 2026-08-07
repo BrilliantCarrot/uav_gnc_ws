@@ -55,22 +55,22 @@ class UavGoalEnvConfig:
     init_z: float = 0.0
 
     # PPO action을 속도/yaw-rate 명령으로 해석할 때 사용하는 최대 명령 크기.
-    max_vxy_cmd: float = 2.0
-    max_vz_cmd: float = 1.2
+    max_vxy_cmd: float = 2.5
+    max_vz_cmd: float = 2.5
 
     # Residual RL 설정. 기본 guidance 명령 위에 PPO가 제한된 보정값만 더한다.
     use_guidance_prior: bool = True
-    guidance_max_vxy: float = 1.0
-    guidance_max_vz: float = 0.8
+    guidance_max_vxy: float = 1.5
+    guidance_max_vz: float = 1.0
     guidance_k_xy: float = 0.35
     guidance_k_z: float = 0.8
-    residual_action_scale: float = 0.35
+    residual_action_scale: float = 0.4
     max_yaw_rate_cmd: float = 1.0
 
     # 저수준 velocity/attitude controller 및 actuator 보호용 제한값.
     max_tilt_deg: float = 25.0
-    max_acc_xy: float = 4.0
-    max_acc_z: float = 5.0
+    max_acc_xy: float = 5.0
+    max_acc_z: float = 6.0
     kp_vel_xy: float = 2.2
     kp_vel_z: float = 3.5
     kp_att_rp: float = 4.0

@@ -22,6 +22,7 @@ setup(
             "train_uav_ppo = uav_rl.scripts.train_ppo:main",
             "rollout_uav_policy = uav_rl.scripts.rollout_policy:main",
             "plot_rl_rollout = uav_rl.scripts.plot_rollout:main",
+            "rl_residual_guidance_node = uav_rl.scripts.rl_residual_guidance_node:main",
         ],
     },
 )

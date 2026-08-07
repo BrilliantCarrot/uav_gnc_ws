@@ -7,6 +7,11 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <string>
+
 using namespace std::chrono_literals;
 
 // ======================================================================
@@ -29,21 +34,35 @@ public:
   PX4BridgeNode() : Node("px4_bridge_node"), offboard_counter_(0), is_armed_(false)
   {
     // ===== 파라미터 =====
-    arm_on_start_    = this->declare_parameter<bool>("arm_on_start", false);
-    takeoff_z_enu_   = this->declare_parameter<double>("takeoff_z_enu", 2.0); // 이륙 고도 (ENU, m)
+    setpoint_topic_ = this->declare_parameter<std::string>(
+      "setpoint_topic", "/guidance/setpoint");
+    px4_odom_topic_ = this->declare_parameter<std::string>(
+      "px4_odom_topic", "/fmu/out/vehicle_odometry");
+    offboard_control_mode_topic_ = this->declare_parameter<std::string>(
+      "offboard_control_mode_topic", "/fmu/in/offboard_control_mode");
+    trajectory_setpoint_topic_ = this->declare_parameter<std::string>(
+      "trajectory_setpoint_topic", "/fmu/in/trajectory_setpoint");
+    vehicle_command_topic_ = this->declare_parameter<std::string>(
+      "vehicle_command_topic", "/fmu/in/vehicle_command");
+    offboard_mode_ = this->declare_parameter<std::string>(
+      "offboard_mode", "position");
+    arm_on_start_ = this->declare_parameter<bool>("arm_on_start", false);
+    takeoff_z_enu_ = this->declare_parameter<double>("takeoff_z_enu", 2.0);
+    heartbeat_period_ms_ = this->declare_parameter<int>("heartbeat_period_ms", 100);
+    offboard_start_count_ = this->declare_parameter<int>("offboard_start_count", 10);
 
     // ===== 퍼블리셔 =====
     offboard_mode_pub_ = this->create_publisher<px4_msgs::msg::OffboardControlMode>(
-      "/fmu/in/offboard_control_mode", 10);
+      offboard_control_mode_topic_, 10);
     traj_setpoint_pub_ = this->create_publisher<px4_msgs::msg::TrajectorySetpoint>(
-      "/fmu/in/trajectory_setpoint", 10);
+      trajectory_setpoint_topic_, 10);
     vehicle_cmd_pub_ = this->create_publisher<px4_msgs::msg::VehicleCommand>(
-      "/fmu/in/vehicle_command", 10);
+      vehicle_command_topic_, 10);
 
     // ===== 구독자 =====
     // guidance_node가 퍼블리시하는 목표 위치 (ENU)
     setpoint_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-      "/guidance/setpoint", 10,
+      setpoint_topic_, 10,
       [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
         latest_setpoint_ = msg;
       });
@@ -51,7 +70,7 @@ public:
     // PX4 odom 구독 (상태 모니터링용) — BEST_EFFORT QoS 필수
     // SensorDataQoS = BEST_EFFORT + VOLATILE (PX4 표준)
     px4_odom_sub_ = this->create_subscription<px4_msgs::msg::VehicleOdometry>(
-      "/fmu/out/vehicle_odometry",
+      px4_odom_topic_,
       rclcpp::SensorDataQoS(),
       [this](const px4_msgs::msg::VehicleOdometry::SharedPtr msg) {
         latest_px4_odom_ = msg;
@@ -59,13 +78,19 @@ public:
 
     // ===== 100ms 타이머 — Offboard heartbeat (필수) =====
     // PX4는 2Hz 이상으로 offboard_control_mode를 받지 못하면 Offboard 모드 해제
-    timer_ = this->create_wall_timer(100ms, [this]() { timerCallback(); });
+    const int safe_period_ms = std::clamp(heartbeat_period_ms_, 20, 500);
+    timer_ = this->create_wall_timer(
+      std::chrono::milliseconds(safe_period_ms),
+      [this]() { timerCallback(); });
 
     // 초기 setpoint: 제자리 호버링 (고도 takeoff_z_enu_)
     latest_setpoint_ = nullptr;
 
-    RCLCPP_INFO(this->get_logger(), "PX4 Bridge Node started");
-    RCLCPP_INFO(this->get_logger(), "Waiting for /guidance/setpoint...");
+    RCLCPP_INFO(
+      this->get_logger(),
+      "PX4 Bridge Node started: setpoint=%s -> %s mode=%s arm_on_start=%s",
+      setpoint_topic_.c_str(), trajectory_setpoint_topic_.c_str(), offboard_mode_.c_str(),
+      arm_on_start_ ? "true" : "false");
   }
 
 private:
@@ -84,7 +109,8 @@ private:
     }
 
     // 3. Offboard 모드 진입 + Arm (10번 heartbeat 후)
-    if (offboard_counter_ == 10 && arm_on_start_ && !is_armed_) {
+    if (offboard_counter_ == static_cast<uint64_t>(std::max(offboard_start_count_, 1)) &&
+        arm_on_start_ && !is_armed_) {
       RCLCPP_INFO(this->get_logger(), "Switching to Offboard mode and Arming...");
       publishVehicleCommand(px4_msgs::msg::VehicleCommand::VEHICLE_CMD_DO_SET_MODE, 1, 6);
       arm();
@@ -97,9 +123,9 @@ private:
   void publishOffboardControlMode()
   {
     px4_msgs::msg::OffboardControlMode msg{};
-    msg.position     = true;   // position 제어 사용
-    msg.velocity     = false;
-    msg.acceleration = false;
+    msg.position     = (offboard_mode_ == "position" || offboard_mode_ == "position_velocity");
+    msg.velocity     = (offboard_mode_ == "velocity" || offboard_mode_ == "position_velocity");
+    msg.acceleration = (offboard_mode_ == "acceleration");
     msg.attitude     = false;
     msg.body_rate    = false;
     msg.timestamp    = this->get_clock()->now().nanoseconds() / 1000;
@@ -110,6 +136,7 @@ private:
   void publishTrajectorySetpoint(const nav_msgs::msg::Odometry::SharedPtr& odom)
   {
     px4_msgs::msg::TrajectorySetpoint msg{};
+    fillNaN(msg);
 
     // ENU → NED 좌표계 변환
     // ENU: x=East,  y=North, z=Up
@@ -118,9 +145,17 @@ private:
     float y_enu = static_cast<float>(odom->pose.pose.position.y);
     float z_enu = static_cast<float>(odom->pose.pose.position.z);
 
-    msg.position[0] =  y_enu;   // NED x = ENU y (North)
-    msg.position[1] =  x_enu;   // NED y = ENU x (East)
-    msg.position[2] = -z_enu;   // NED z = -ENU z (Down)
+    if (offboard_mode_ == "position" || offboard_mode_ == "position_velocity") {
+      msg.position[0] =  y_enu;   // NED x = ENU y (North)
+      msg.position[1] =  x_enu;   // NED y = ENU x (East)
+      msg.position[2] = -z_enu;   // NED z = -ENU z (Down)
+    }
+
+    if (offboard_mode_ == "velocity" || offboard_mode_ == "position_velocity") {
+      msg.velocity[0] = static_cast<float>(odom->twist.twist.linear.y);
+      msg.velocity[1] = static_cast<float>(odom->twist.twist.linear.x);
+      msg.velocity[2] = static_cast<float>(-odom->twist.twist.linear.z);
+    }
 
     // quaternion → yaw 변환 후 ENU → NED yaw 변환
     // NED yaw = -(ENU yaw) + PI/2 (좌표계 회전 보정)
@@ -143,6 +178,7 @@ private:
   void publishHoverSetpoint()
   {
     px4_msgs::msg::TrajectorySetpoint msg{};
+    fillNaN(msg);
 
     if (latest_px4_odom_ != nullptr) {
       // PX4 odom은 이미 NED 좌표계 — 위치 그대로 사용
@@ -197,6 +233,17 @@ private:
     vehicle_cmd_pub_->publish(msg);
   }
 
+  static void fillNaN(px4_msgs::msg::TrajectorySetpoint& msg)
+  {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    msg.position = {nan, nan, nan};
+    msg.velocity = {nan, nan, nan};
+    msg.acceleration = {nan, nan, nan};
+    msg.jerk = {nan, nan, nan};
+    msg.yaw = nan;
+    msg.yawspeed = nan;
+  }
+
   // ===== 멤버 변수 =====
   rclcpp::TimerBase::SharedPtr timer_;
 
@@ -210,10 +257,18 @@ private:
   nav_msgs::msg::Odometry::SharedPtr      latest_setpoint_;
   px4_msgs::msg::VehicleOdometry::SharedPtr latest_px4_odom_;
 
+  std::string setpoint_topic_;
+  std::string px4_odom_topic_;
+  std::string offboard_control_mode_topic_;
+  std::string trajectory_setpoint_topic_;
+  std::string vehicle_command_topic_;
+  std::string offboard_mode_;
   uint64_t offboard_counter_;
   bool     is_armed_;
   bool     arm_on_start_;
   double   takeoff_z_enu_;
+  int      heartbeat_period_ms_{100};
+  int      offboard_start_count_{10};
 };
 
 int main(int argc, char* argv[])

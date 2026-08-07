@@ -2,14 +2,19 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, RegisterEventHandler, EmitEvent
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
-from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
 import os
 import yaml
 
 def generate_launch_description():
     actuator_mode = LaunchConfiguration('actuator_mode')
+    use_rl_guidance = LaunchConfiguration('use_rl_guidance')
+    rl_enable_policy = LaunchConfiguration('rl_enable_policy')
+    rl_model_path = LaunchConfiguration('rl_model_path')
 
     dynamics_pkg = get_package_share_directory('uav_dynamics')
     guidance_pkg = get_package_share_directory('uav_guidance')
@@ -64,7 +69,38 @@ def generate_launch_description():
         executable='control_node',
         name='control_node',
         output='screen',
-        parameters=[control_yaml]
+        parameters=[
+            control_yaml,
+            {
+                'setpoint_topic': PythonExpression([
+                    "'/guidance/setpoint_rl' if '", use_rl_guidance,
+                    "'.lower() == 'true' else '/guidance/setpoint'"
+                ]),
+                'trajectory_preview_topic': PythonExpression([
+                    "'/guidance/trajectory_preview_rl' if '", use_rl_guidance,
+                    "'.lower() == 'true' else '/guidance/trajectory_preview'"
+                ]),
+            }
+        ]
+    )
+    rl_residual_guidance = Node(
+        package='uav_rl',
+        executable='rl_residual_guidance_node',
+        name='rl_residual_guidance_node',
+        output='screen',
+        condition=IfCondition(use_rl_guidance),
+        parameters=[{
+            'enable_policy': ParameterValue(rl_enable_policy, value_type=bool),
+            'model_path': rl_model_path,
+            'nav_odom_topic': '/nav/odom',
+            'input_setpoint_topic': '/guidance/setpoint',
+            'output_setpoint_topic': '/guidance/setpoint_rl',
+            'input_preview_topic': '/guidance/trajectory_preview',
+            'output_preview_topic': '/guidance/trajectory_preview_rl',
+            'max_vel_residual_xy': 0.30,
+            'max_vel_residual_z': 0.20,
+            'max_yaw_rate_residual': 0.20,
+        }]
     )
     # 노드 정의 추가
     planner = Node(
@@ -210,9 +246,25 @@ def generate_launch_description():
             default_value='direct_wrench',
             description='Simulation actuator mode: direct_wrench or multirotor'
         ),
+        DeclareLaunchArgument(
+            'use_rl_guidance',
+            default_value='false',
+            description='Use RL residual guidance setpoint topic when true'
+        ),
+        DeclareLaunchArgument(
+            'rl_enable_policy',
+            default_value='false',
+            description='Load and run PPO policy in rl_residual_guidance_node when true'
+        ),
+        DeclareLaunchArgument(
+            'rl_model_path',
+            default_value='',
+            description='Path to trained PPO .zip model for RL guidance validation'
+        ),
         simulation,
         guidance,
         navigation,
+        rl_residual_guidance,
         control,
         virtual_lidar,
         lidar_preprocess,

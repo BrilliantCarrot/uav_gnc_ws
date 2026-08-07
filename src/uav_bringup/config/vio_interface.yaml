@@ -1,0 +1,17 @@
+vio_interface:
+  ros__parameters:
+    # Planned standard topics for a future VIO backend.
+    # Stereo VIO backends can subscribe to stereo images and /sim/imu.
+    # RGB-D odometry/SLAM backends can subscribe to RGB-D image/depth topics.
+    stereo_left_image_topic: "/stereo/left/image_raw"
+    stereo_right_image_topic: "/stereo/right/image_raw"
+    rgbd_image_topic: "/rgbd/image_raw"
+    rgbd_depth_topic: "/rgbd/depth/image_raw"
+    imu_topic: "/sim/imu"
+    output_odom_topic: "/vio/odom"
+
+    # Localization manager should reject stale or jumping VIO in the same way
+    # it already rejects unstable LIO. These are initial nominal gate values.
+    max_source_age_sec: 0.20
+    max_pose_jump_m: 2.0
+    max_yaw_jump_rad: 1.0

@@ -20,18 +20,33 @@ class PX4OdomConverterNode : public rclcpp::Node
 public:
   PX4OdomConverterNode() : Node("px4_odom_converter")
   {
+    px4_odom_topic_ = this->declare_parameter<std::string>(
+      "px4_odom_topic", "/fmu/out/vehicle_odometry");
+    nav_odom_topic_ = this->declare_parameter<std::string>(
+      "nav_odom_topic", "/nav/odom");
+    output_frame_id_ = this->declare_parameter<std::string>(
+      "output_frame_id", "world");
+    output_child_frame_id_ = this->declare_parameter<std::string>(
+      "output_child_frame_id", "base_link");
+    use_px4_timestamp_ = this->declare_parameter<bool>(
+      "use_px4_timestamp", false);
+
     // PX4 토픽은 BEST_EFFORT QoS 필수
     px4_odom_sub_ = this->create_subscription<px4_msgs::msg::VehicleOdometry>(
-      "/fmu/out/vehicle_odometry",
+      px4_odom_topic_,
       rclcpp::SensorDataQoS(),
       [this](const px4_msgs::msg::VehicleOdometry::SharedPtr msg) {
         convertAndPublish(msg);
       });
 
     nav_odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>(
-      "/nav/odom", 10);
+      nav_odom_topic_, 10);
 
-    RCLCPP_INFO(this->get_logger(), "PX4 Odom Converter started (NED → ENU)");
+    RCLCPP_INFO(
+      this->get_logger(),
+      "PX4 Odom Converter started: %s -> %s (NED -> ENU, frame=%s child=%s)",
+      px4_odom_topic_.c_str(), nav_odom_topic_.c_str(),
+      output_frame_id_.c_str(), output_child_frame_id_.c_str());
   }
 
 private:
@@ -39,9 +54,14 @@ private:
   {
     nav_msgs::msg::Odometry odom{};
 
-    odom.header.stamp    = this->get_clock()->now();
-    odom.header.frame_id = "odom";
-    odom.child_frame_id  = "base_link";
+    if (use_px4_timestamp_ && px4_odom->timestamp > 0) {
+      odom.header.stamp = rclcpp::Time(
+        static_cast<int64_t>(px4_odom->timestamp) * 1000, RCL_ROS_TIME);
+    } else {
+      odom.header.stamp = this->get_clock()->now();
+    }
+    odom.header.frame_id = output_frame_id_;
+    odom.child_frame_id  = output_child_frame_id_;
 
     // NED → ENU 위치 변환
     odom.pose.pose.position.x =  px4_odom->position[1];  // ENU x = NED y
@@ -72,8 +92,18 @@ private:
     odom.twist.twist.linear.y =  px4_odom->velocity[0];
     odom.twist.twist.linear.z = -px4_odom->velocity[2];
 
+    odom.twist.twist.angular.x =  px4_odom->angular_velocity[1];
+    odom.twist.twist.angular.y =  px4_odom->angular_velocity[0];
+    odom.twist.twist.angular.z = -px4_odom->angular_velocity[2];
+
     nav_odom_pub_->publish(odom);
   }
+
+  std::string px4_odom_topic_;
+  std::string nav_odom_topic_;
+  std::string output_frame_id_;
+  std::string output_child_frame_id_;
+  bool use_px4_timestamp_{false};
 
   rclcpp::Subscription<px4_msgs::msg::VehicleOdometry>::SharedPtr px4_odom_sub_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr            nav_odom_pub_;

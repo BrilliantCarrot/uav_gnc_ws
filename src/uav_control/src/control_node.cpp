@@ -139,8 +139,10 @@ public:
             // 데이터가 꼬일 수 있음(race condition). lock_guard가 mutex를 잡아서 
             // 한 번에 하나의 스레드만 접근하도록 보장. lock_guard는 스코프를 벗어나면 
             // 자동으로 unlock돼서 데드락 위험이 없음.
+            trajectory_preview_topic_ = this->declare_parameter<std::string>(
+                "trajectory_preview_topic", "/guidance/trajectory_preview");
             preview_sub_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
-                "/guidance/trajectory_preview", 10,
+                trajectory_preview_topic_, 10,
                 [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
                     std::lock_guard<std::mutex> lock(mtx_);
                     mpc_controller_.setTrajectoryPreview(msg->data);
@@ -158,19 +160,21 @@ public:
             "/control/wrench", 10);
 
         odom_topic_ = this->declare_parameter<std::string>("odom_topic", "/nav/odom");
+        setpoint_topic_ = this->declare_parameter<std::string>("setpoint_topic", "/guidance/setpoint");
         odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
             odom_topic_, 10,
             std::bind(&ControlNode::odomCallback, this, std::placeholders::_1));
 
         sp_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-            "/guidance/setpoint", 10,
+            setpoint_topic_, 10,
             std::bind(&ControlNode::setpointCallback, this, std::placeholders::_1));
 
         timer_ = this->create_wall_timer(
             std::chrono::duration<double>(dt_),
             std::bind(&ControlNode::onTimer, this));
 
-        RCLCPP_INFO(this->get_logger(), "control_node started (dt=%.4f)", dt_);
+        RCLCPP_INFO(this->get_logger(), "control_node started (dt=%.4f, setpoint_topic=%s)",
+                    dt_, setpoint_topic_.c_str());
     }
 
 private:
@@ -280,6 +284,8 @@ private:
     int             control_log_period_ms_{1000};
     std::mutex      mtx_;
     std::string     odom_topic_;
+    std::string     setpoint_topic_;
+    std::string     trajectory_preview_topic_;
     Vec3            int_e_v_{0.0, 0.0, 0.0};
 
     rclcpp::Publisher<geometry_msgs::msg::WrenchStamped>::SharedPtr wrench_pub_;

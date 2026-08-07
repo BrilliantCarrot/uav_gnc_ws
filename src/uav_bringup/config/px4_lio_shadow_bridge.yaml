@@ -1,0 +1,14 @@
+# Minimal bridge for PX4 x500_lidar + FAST-LIO2 shadow validation.
+# Keep this separate from the broader LIO/VIO environment bridge so missing
+# camera/RGB-D topics do not add noise while validating LiDAR odometry.
+- ros_topic_name: "/gazebo/lidar/points_raw"
+  gz_topic_name: "/gazebo/lidar/points/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  direction: "GZ_TO_ROS"
+
+- ros_topic_name: "/gazebo/imu_raw"
+  gz_topic_name: "/gazebo/imu"
+  ros_type_name: "sensor_msgs/msg/Imu"
+  gz_type_name: "gz.msgs.IMU"
+  direction: "GZ_TO_ROS"

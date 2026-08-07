@@ -10,6 +10,8 @@ control_node:
     k1: 0.15
     k2: 0.02
     odom_topic: "/nav/odom" # 노이즈 없는 상태를 보려면(guidacne only) /sim/odom으로 
+    setpoint_topic: "/guidance/setpoint"
+    trajectory_preview_topic: "/guidance/trajectory_preview"
     # ===== 제어기 추종 성능을 높이기 위해 새로 추가하는 값들 ===== 
     kp_pos_xy: 1.5 # 1.5
     kp_pos_z: 2.0 # Lag 감소를 위해 P,D 게인 강화 

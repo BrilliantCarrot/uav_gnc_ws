@@ -26,6 +26,10 @@ if(px4_msgs_FOUND)
     src/px4_odom_converter.cpp
   )
 
+  add_executable(lio_to_px4_visual_odometry
+    src/lio_to_px4_visual_odometry.cpp
+  )
+
   ament_target_dependencies(px4_bridge_node
     rclcpp nav_msgs geometry_msgs px4_msgs tf2 tf2_geometry_msgs
   )
@@ -34,9 +38,14 @@ if(px4_msgs_FOUND)
     rclcpp nav_msgs px4_msgs tf2
   )
 
+  ament_target_dependencies(lio_to_px4_visual_odometry
+    rclcpp nav_msgs px4_msgs tf2
+  )
+
   install(TARGETS
     px4_bridge_node
     px4_odom_converter
+    lio_to_px4_visual_odometry
     DESTINATION lib/${PROJECT_NAME}
   )
 else()
@@ -44,6 +53,10 @@ else()
 endif()
 
 install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(FILES README.md
   DESTINATION share/${PROJECT_NAME}
 )
 

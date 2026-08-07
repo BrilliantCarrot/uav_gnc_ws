@@ -11,6 +11,13 @@ def generate_launch_description():
     actuator_mode = LaunchConfiguration('actuator_mode')
     use_lio_test_source = LaunchConfiguration('use_lio_test_source')
     start_fast_lio = LaunchConfiguration('start_fast_lio')
+    use_raw_lidar_sim = LaunchConfiguration('use_raw_lidar_sim')
+    use_gazebo_lidar_adapter = LaunchConfiguration('use_gazebo_lidar_adapter')
+    lio_imu_input = LaunchConfiguration('lio_imu_input')
+    sync_gazebo_pose = LaunchConfiguration('sync_gazebo_pose')
+    gazebo_world_name = LaunchConfiguration('gazebo_world_name')
+    gazebo_model_name = LaunchConfiguration('gazebo_model_name')
+    gazebo_pose_z_offset = LaunchConfiguration('gazebo_pose_z_offset')
 
     dynamics_pkg = get_package_share_directory('uav_dynamics')
     guidance_pkg = get_package_share_directory('uav_guidance')
@@ -43,6 +50,7 @@ def generate_launch_description():
         executable='raw_lidar_sim_node',
         name='raw_lidar_sim_node',
         output='screen',
+        condition=IfCondition(use_raw_lidar_sim),
         parameters=[raw_lidar_yaml]
     )
 
@@ -51,7 +59,38 @@ def generate_launch_description():
         executable='imu_lio_adapter_node',
         name='imu_lio_adapter_node',
         output='screen',
-        parameters=[imu_lio_adapter_yaml]
+        parameters=[imu_lio_adapter_yaml, {'input_topic': lio_imu_input}]
+    )
+
+    gazebo_lidar_fastlio_adapter = Node(
+        package='uav_perception',
+        executable='gazebo_lidar_fastlio_adapter_node',
+        name='gazebo_lidar_fastlio_adapter_node',
+        output='screen',
+        condition=IfCondition(use_gazebo_lidar_adapter),
+        parameters=[{
+            'input_topic': '/gazebo/lidar/points_raw',
+            'output_topic': '/lidar/points_raw',
+            'frame_id': 'lidar',
+            'scan_line': 32,
+            'scan_rate_hz': 20.0,
+            'restamp_with_ros_time': True,
+        }]
+    )
+
+    sim_odom_to_gazebo_pose = Node(
+        package='uav_bringup',
+        executable='sim_odom_to_gazebo_pose_node',
+        name='sim_odom_to_gazebo_pose_node',
+        output='screen',
+        condition=IfCondition(sync_gazebo_pose),
+        parameters=[{
+            'odom_topic': '/sim/odom',
+            'world_name': gazebo_world_name,
+            'model_name': gazebo_model_name,
+            'publish_rate_hz': 30.0,
+            'z_offset_m': gazebo_pose_z_offset,
+        }]
     )
 
     # LIO backend is intentionally external. Run FAST-LIO/LIO-SAM separately and remap its odom to /lio/odom.
@@ -171,8 +210,45 @@ def generate_launch_description():
             default_value='false',
             description='Start fast_lio/fastlio_mapping from a sourced FAST_LIO_ROS2 workspace.'
         ),
+        DeclareLaunchArgument(
+            'use_raw_lidar_sim',
+            default_value='true',
+            description='Start the legacy /sim/odom-based raw_lidar_sim_node.'
+        ),
+        DeclareLaunchArgument(
+            'use_gazebo_lidar_adapter',
+            default_value='false',
+            description='Convert Gazebo PointCloud2 to FAST-LIO-compatible /lidar/points_raw.'
+        ),
+        DeclareLaunchArgument(
+            'lio_imu_input',
+            default_value='/sim/imu',
+            description='Input IMU topic for imu_lio_adapter_node.'
+        ),
+        DeclareLaunchArgument(
+            'sync_gazebo_pose',
+            default_value='false',
+            description='Drive the Gazebo sensor rig pose from /sim/odom for integrated LIO validation.'
+        ),
+        DeclareLaunchArgument(
+            'gazebo_world_name',
+            default_value='gps_denied_outdoor_lio_vio',
+            description='Gazebo world name used by the /world/<name>/set_pose service.'
+        ),
+        DeclareLaunchArgument(
+            'gazebo_model_name',
+            default_value='f450_lio_vio_sensor_rig',
+            description='Gazebo sensor rig model name to synchronize with /sim/odom.'
+        ),
+        DeclareLaunchArgument(
+            'gazebo_pose_z_offset',
+            default_value='0.25',
+            description='Height offset applied when driving the Gazebo sensor rig from /sim/odom.'
+        ),
         simulation,
+        sim_odom_to_gazebo_pose,
         raw_lidar,
+        gazebo_lidar_fastlio_adapter,
         imu_lio_adapter,
         base_to_lidar_tf,
         base_to_imu_tf,

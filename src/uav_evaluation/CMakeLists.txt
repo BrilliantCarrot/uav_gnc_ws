@@ -21,6 +21,10 @@ add_executable(planning_path_logger_node
   src/planning_path_logger_node.cpp
 )
 
+add_executable(px4_tracking_rmse_node
+  src/px4_tracking_rmse_node.cpp
+)
+
 ament_target_dependencies(tracking_eval_node
   rclcpp nav_msgs
 )
@@ -29,9 +33,14 @@ ament_target_dependencies(planning_path_logger_node
   rclcpp nav_msgs
 )
 
+ament_target_dependencies(px4_tracking_rmse_node
+  rclcpp nav_msgs
+)
+
 install(TARGETS
   tracking_eval_node
   planning_path_logger_node
+  px4_tracking_rmse_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -75,6 +75,10 @@ public:
       this->declare_parameter<int>("final_direct_guidance_wp_count", 3);
     final_direct_accept_radius_ =
       this->declare_parameter<double>("final_direct_accept_radius", 0.35);
+    wait_for_start_waypoint_ =
+      this->declare_parameter<bool>("wait_for_start_waypoint", false);
+    start_waypoint_accept_radius_ =
+      this->declare_parameter<double>("start_waypoint_accept_radius", 0.35);
 
     // ---------------------------------------------------
     // 2. Pub / Sub 및 타이머 설정
@@ -163,6 +167,41 @@ private:
     return use_planner_ &&
       wp_x_.size() >= 2 &&
       wp_x_.size() <= static_cast<size_t>(std::max(2, final_direct_guidance_wp_count_));
+  }
+
+  bool isNearStartWaypoint() const {
+    if (!wait_for_start_waypoint_ || wp_x_.empty()) return true;
+
+    const double dx = wp_x_.front() - current_x_;
+    const double dy = wp_y_.front() - current_y_;
+    const double dz = wp_z_.front() - current_z_;
+    return std::hypot(dx, dy, dz) <= start_waypoint_accept_radius_;
+  }
+
+  void holdStartWaypoint(nav_msgs::msg::Odometry& sp) {
+    if (wp_x_.empty()) return;
+
+    sp.pose.pose.position.x = wp_x_.front();
+    sp.pose.pose.position.y = wp_y_.front();
+    sp.pose.pose.position.z = wp_z_.front();
+    sp.pose.pose.orientation = yawToQuat(current_yaw_);
+    sp.twist.twist.linear.x = 0.0;
+    sp.twist.twist.linear.y = 0.0;
+    sp.twist.twist.linear.z = 0.0;
+    sp.twist.twist.angular.x = 0.0;
+    sp.twist.twist.angular.y = 0.0;
+    sp.twist.twist.angular.z = 0.0;
+  }
+
+  void startTrajectoryIfReady() {
+    if (mission_started_ || !have_odom_ || !isNearStartWaypoint()) return;
+
+    if (guidance_mode_ == "min_jerk" || guidance_mode_ == "min_snap") {
+      generateTrajectoryForCurrentSegment();
+    } else if (guidance_mode_ == "multi_snap") {
+      generateMultiSegmentTrajectory();
+    }
+    mission_started_ = is_trajectory_active_;
   }
 
   bool fillDirectGoalSetpoint(nav_msgs::msg::Odometry& sp) {
@@ -324,12 +363,8 @@ private:
     // 노드가 켜지고 '최초로' 위치를 수신했을 때 딱 한 번 궤적을 만들어줌
     if (!have_odom_) {
       have_odom_ = true;
-      if (guidance_mode_ == "min_jerk" || guidance_mode_ == "min_snap") {
-        generateTrajectoryForCurrentSegment(); // 단일 구간 궤적 생성
-      } else if (guidance_mode_ == "multi_snap") {
-        generateMultiSegmentTrajectory();      // 다중 구간 전체 궤적 한 번에 생성
-      }
     }
+    startTrajectoryIfReady();
   }
 
   // ---------------------------------------------------
@@ -588,6 +623,22 @@ void publishTrajectoryPreview(double t_now) {
     sp.header.stamp = this->now();
     sp.header.frame_id = last_frame_id_.empty() ? "world" : last_frame_id_;
 
+    if (wait_for_start_waypoint_ && !mission_started_) {
+      holdStartWaypoint(sp);
+      setpoint_pub_->publish(sp);
+      if (reference_log_enabled_) {
+        RCLCPP_INFO_THROTTLE(
+          this->get_logger(), *this->get_clock(), reference_log_period_ms_,
+          "[Guidance Ref] waiting_start=true cur=(%.2f, %.2f, %.2f) start=(%.2f, %.2f, %.2f) |start-cur|=%.2fm",
+          current_x_, current_y_, current_z_,
+          wp_x_.empty() ? 0.0 : wp_x_.front(),
+          wp_y_.empty() ? 0.0 : wp_y_.front(),
+          wp_z_.empty() ? 0.0 : wp_z_.front(),
+          wp_x_.empty() ? 0.0 : std::hypot(wp_x_.front() - current_x_, wp_y_.front() - current_y_, wp_z_.front() - current_z_));
+      }
+      return;
+    }
+
     // ==========================================
     // 모드 1: 6주차 (Look-ahead 모드)
     // ==========================================
@@ -829,6 +880,8 @@ private:
   double max_yaw_rate_dps_{60.0};
   int final_direct_guidance_wp_count_{3};
   double final_direct_accept_radius_{0.35};
+  bool wait_for_start_waypoint_{false};
+  double start_waypoint_accept_radius_{0.35};
   double planner_goal_x_{1e9}, planner_goal_y_{1e9};
   bool have_last_planner_retrajectory_time_{false};
   rclcpp::Time last_planner_retrajectory_time_{0, 0, RCL_ROS_TIME};
@@ -847,6 +900,7 @@ private:
   rclcpp::Time segment_start_time_;
   double current_segment_T_{0.0}, total_multi_T_{0.0};
   bool is_trajectory_active_{false};
+  bool mission_started_{false};
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr setpoint_pub_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr preview_pub_; // MPC trajectory preview

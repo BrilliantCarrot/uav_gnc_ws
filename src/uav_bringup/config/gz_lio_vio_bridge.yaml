@@ -1,0 +1,44 @@
+# Bridge topics for the GPS-denied outdoor Gazebo/GZ world.
+# Exact GZ topic names can vary by Gazebo version; inspect with `gz topic -l`
+# and adjust this file before using ros_gz_bridge.
+- ros_topic_name: "/gazebo/lidar/points_raw"
+  gz_topic_name: "/gazebo/lidar/points/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  direction: "GZ_TO_ROS"
+
+- ros_topic_name: "/gazebo/imu_raw"
+  gz_topic_name: "/gazebo/imu"
+  ros_type_name: "sensor_msgs/msg/Imu"
+  gz_type_name: "gz.msgs.IMU"
+  direction: "GZ_TO_ROS"
+
+- ros_topic_name: "/stereo/left/image_raw"
+  gz_topic_name: "/gazebo/stereo/left/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: "GZ_TO_ROS"
+
+- ros_topic_name: "/stereo/right/image_raw"
+  gz_topic_name: "/gazebo/stereo/right/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: "GZ_TO_ROS"
+
+- ros_topic_name: "/rgbd/image_raw"
+  gz_topic_name: "/gazebo/rgbd/image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: "GZ_TO_ROS"
+
+- ros_topic_name: "/rgbd/depth/image_raw"
+  gz_topic_name: "/gazebo/rgbd/depth_image"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: "GZ_TO_ROS"
+
+- ros_topic_name: "/rgbd/points"
+  gz_topic_name: "/gazebo/rgbd/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  direction: "GZ_TO_ROS"

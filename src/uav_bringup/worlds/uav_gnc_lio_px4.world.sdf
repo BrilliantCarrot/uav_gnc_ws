@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sdf version="1.9">
+  <world name="uav_gnc_lio_px4">
+    <physics type="ode">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>250</real_time_update_rate>
+    </physics>
+    <plugin name="gz::sim::systems::Physics" filename="gz-sim-physics-system"/>
+    <plugin name="gz::sim::systems::UserCommands" filename="gz-sim-user-commands-system"/>
+    <plugin name="gz::sim::systems::SceneBroadcaster" filename="gz-sim-scene-broadcaster-system"/>
+    <plugin name="gz::sim::systems::Contact" filename="gz-sim-contact-system"/>
+    <plugin name="gz::sim::systems::Imu" filename="gz-sim-imu-system"/>
+    <plugin name="gz::sim::systems::Magnetometer" filename="gz-sim-magnetometer-system"/>
+    <plugin name="gz::sim::systems::AirPressure" filename="gz-sim-air-pressure-system"/>
+    <plugin name="gz::sim::systems::NavSat" filename="gz-sim-navsat-system"/>
+    <plugin name="gz::sim::systems::Sensors" filename="gz-sim-sensors-system">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <gravity>0 0 -9.8</gravity>
+    <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
+    <atmosphere type="adiabatic"/>
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>47.397971057728974</latitude_deg>
+      <longitude_deg>8.546163739800146</longitude_deg>
+      <elevation>0</elevation>
+    </spherical_coordinates>
+    <scene>
+      <grid>false</grid>
+      <ambient>0.45 0.45 0.45 1</ambient>
+      <background>0.70 0.82 0.95 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <light name="sun" type="directional">
+      <pose>0 0 80 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <intensity>1</intensity>
+      <direction>-0.35 0.25 -0.90</direction>
+      <diffuse>0.9 0.86 0.78 1</diffuse>
+      <specular>0.25 0.25 0.25 1</specular>
+    </light>
+
+    <model name="asphalt_ground">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>90 90 0.05</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>90 90 0.05</size></box></geometry>
+          <material>
+            <ambient>0.22 0.23 0.23 1</ambient>
+            <diffuse>0.22 0.23 0.23 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="landing_markings">
+      <static>true</static>
+      <link name="link">
+        <visual name="landing_h">
+          <pose>0 0 0.04 0 0 0</pose>
+          <geometry><box><size>3.0 0.22 0.01</size></box></geometry>
+          <material><ambient>0.9 0.9 0.9 1</ambient><diffuse>0.9 0.9 0.9 1</diffuse></material>
+        </visual>
+        <visual name="landing_v">
+          <pose>0 0 0.045 0 0 0</pose>
+          <geometry><box><size>0.22 3.0 0.01</size></box></geometry>
+          <material><ambient>0.9 0.9 0.9 1</ambient><diffuse>0.9 0.9 0.9 1</diffuse></material>
+        </visual>
+        <visual name="stripe_0">
+          <pose>-10 -6 0.05 0 0 0.25</pose>
+          <geometry><box><size>10 0.25 0.01</size></box></geometry>
+          <material><ambient>0.95 0.9 0.2 1</ambient><diffuse>0.95 0.9 0.2 1</diffuse></material>
+        </visual>
+        <visual name="stripe_1">
+          <pose>7 -5 0.055 0 0 -0.45</pose>
+          <geometry><box><size>7 0.25 0.01</size></box></geometry>
+          <material><ambient>0.2 0.65 0.95 1</ambient><diffuse>0.2 0.65 0.95 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="north_wall">
+      <static>true</static>
+      <pose>0 13 2.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>28 0.8 4.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>28 0.8 4.0</size></box></geometry>
+          <material><ambient>0.52 0.55 0.58 1</ambient><diffuse>0.52 0.55 0.58 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="east_wall">
+      <static>true</static>
+      <pose>13 1 2.5 0 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>24 0.8 5.0</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>24 0.8 5.0</size></box></geometry>
+          <material><ambient>0.44 0.47 0.50 1</ambient><diffuse>0.44 0.47 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="feature_boxes">
+      <static>true</static>
+      <link name="link">
+        <collision name="box_0_col"><pose>-7 -5 0.8 0 0 0.25</pose><geometry><box><size>2.0 1.2 1.6</size></box></geometry></collision>
+        <visual name="box_0_vis"><pose>-7 -5 0.8 0 0 0.25</pose><geometry><box><size>2.0 1.2 1.6</size></box></geometry><material><ambient>0.8 0.35 0.1 1</ambient><diffuse>0.8 0.35 0.1 1</diffuse></material></visual>
+        <collision name="box_1_col"><pose>9 -6 0.7 0 0 -0.5</pose><geometry><box><size>1.6 2.4 1.4</size></box></geometry></collision>
+        <visual name="box_1_vis"><pose>9 -6 0.7 0 0 -0.5</pose><geometry><box><size>1.6 2.4 1.4</size></box></geometry><material><ambient>0.15 0.55 0.85 1</ambient><diffuse>0.15 0.55 0.85 1</diffuse></material></visual>
+        <collision name="box_2_col"><pose>-8 9 1.1 0 0 0.4</pose><geometry><box><size>2.0 0.9 2.2</size></box></geometry></collision>
+        <visual name="box_2_vis"><pose>-8 9 1.1 0 0 0.4</pose><geometry><box><size>2.0 0.9 2.2</size></box></geometry><material><ambient>0.9 0.9 0.2 1</ambient><diffuse>0.9 0.9 0.2 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="feature_poles">
+      <static>true</static>
+      <link name="link">
+        <collision name="pole_0_col"><pose>-5 -2 1.8 0 0 0</pose><geometry><cylinder><radius>0.18</radius><length>3.6</length></cylinder></geometry></collision>
+        <visual name="pole_0_vis"><pose>-5 -2 1.8 0 0 0</pose><geometry><cylinder><radius>0.18</radius><length>3.6</length></cylinder></geometry><material><ambient>0.65 0.65 0.65 1</ambient><diffuse>0.65 0.65 0.65 1</diffuse></material></visual>
+        <collision name="pole_1_col"><pose>8 4 1.6 0 0 0</pose><geometry><cylinder><radius>0.16</radius><length>3.2</length></cylinder></geometry></collision>
+        <visual name="pole_1_vis"><pose>8 4 1.6 0 0 0</pose><geometry><cylinder><radius>0.16</radius><length>3.2</length></cylinder></geometry><material><ambient>0.25 0.25 0.25 1</ambient><diffuse>0.25 0.25 0.25 1</diffuse></material></visual>
+        <collision name="pole_2_col"><pose>-11 3 2.0 0 0 0</pose><geometry><cylinder><radius>0.20</radius><length>4.0</length></cylinder></geometry></collision>
+        <visual name="pole_2_vis"><pose>-11 3 2.0 0 0 0</pose><geometry><cylinder><radius>0.20</radius><length>4.0</length></cylinder></geometry><material><ambient>0.35 0.2 0.1 1</ambient><diffuse>0.35 0.2 0.1 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <include>
+      <uri>model://x500_lidar</uri>
+      <name>x500_0</name>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
+  </world>
+</sdf>

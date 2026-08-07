@@ -1,20 +1,29 @@
-# UAV GNC System — ROS2-based Autonomous Flight
+# UAV GNC System — ROS2/PX4-based Autonomous Flight
 
-> **End-to-end Guidance · Navigation · Control** system for unmanned aerial vehicles, built from scratch using ROS2 Humble and C++.
+> **End-to-end Guidance · Navigation · Control** system for unmanned aerial vehicles, built with ROS2 Humble, C++17, PX4 SITL, Gazebo, and FAST-LIO2.
 
 ---
 
 ## Overview
 
-This project implements a complete UAV GNC (Guidance, Navigation, and Control) pipeline entirely from scratch — without relying on PX4, ArduPilot, or any off-the-shelf autopilot stack. Every core module, from the 6-DOF physics simulator to the optimal controller, was designed and implemented independently.
+This project started as a from-scratch ROS2 UAV GNC stack for studying flight dynamics, state estimation, guidance, planning, and control. It was later extended into a PX4/Gazebo SITL workflow so that the same guidance and navigation ideas can be tested in a production-style flight stack.
+
+Two runtime paths are maintained:
+
+- **Custom GNC simulation path:** custom 6-DOF dynamics, EKF/UKF navigation, D* Lite planning, minimum-snap guidance, and PID/MPC control.
+- **PX4 SITL integration path:** Gazebo/PX4 handles vehicle dynamics and low-level control, while this project provides ROS2 guidance, PX4 offboard setpoints, FAST-LIO2 odometry, and PX4 EKF2 external-vision fusion.
 
 **Key highlights:**
 - 6-DOF Newton-Euler flight dynamics simulator with RK4 integration
-- 15-State Error-State EKF fusing IMU (100 Hz) and GPS (10 Hz)
-- Multi-Segment Minimum Snap trajectory optimization (8N × 8N matrix system)
+- F450-style multirotor model with rotor thrust allocation, motor lag, yaw torque, and actuator saturation
+- 15-State Error-State EKF / UKF fusing IMU, GPS, and LiDAR-derived pose measurements
+- Multi-Segment Minimum Snap trajectory generation with QP/KKT-based coefficient solving
 - Cascaded PID controller with feedforward and integral disturbance rejection
 - Linear MPC (Condensed formulation) with precomputed K_first — 100 Hz real-time
-- Robustness testing under constant wind disturbance (1 N) and GPS noise (0.5 m)
+- D* Lite obstacle-aware path planning with 2.5D LiDAR occupancy projection
+- PX4 v1.16 + Gazebo Harmonic SITL offboard flight integration
+- FAST-LIO2 odometry connection to PX4 EKF2 as external vision
+- GPS-denied waypoint flight using LIO horizontal position + barometric height
 
 ---
 
@@ -35,6 +44,35 @@ This project implements a complete UAV GNC (Guidance, Navigation, and Control) p
 | `navigation_node` | EKF / UKF-based state estimation (IMU prediction + GPS or LiDAR correction), outputs `/nav/odom` | 100 Hz predict / 10 Hz update |
 | `guidance_node` | Converts planner path into smooth trajectory using multi-segment minimum-snap and generates reference setpoints | 20 Hz |
 | `control_node` | Executes cascaded PID or Linear MPC for trajectory tracking using `/nav/odom` and guidance setpoints | 100 Hz |
+
+### PX4 SITL Runtime Path
+
+```text
+PX4 + Gazebo
+  -> /fmu/out/vehicle_odometry
+  -> px4_odom_converter
+  -> /nav/odom
+  -> guidance_node
+  -> /guidance/setpoint
+  -> px4_bridge_node
+  -> /fmu/in/trajectory_setpoint
+  -> PX4 internal position/velocity/attitude/rate controllers
+  -> Gazebo vehicle motion
+```
+
+### FAST-LIO2 / PX4 EKF2 Fusion Path
+
+```text
+Gazebo LiDAR + IMU
+  -> ros_gz_bridge
+  -> gazebo_lidar_fastlio_adapter_node / imu_lio_adapter_node
+  -> FAST-LIO2
+  -> /lio/odom
+  -> lio_to_px4_visual_odometry
+  -> /fmu/in/vehicle_visual_odometry
+  -> PX4 EKF2 external vision fusion
+  -> /fmu/out/vehicle_odometry
+```
 
 ---
 
@@ -92,11 +130,34 @@ This project implements a complete UAV GNC (Guidance, Navigation, and Control) p
 - Projects 3D LiDAR points into a 2.5D occupancy grid around the UAV flight altitude.
 - The 2.5D map representation keeps the planner lightweight while still using 3D LiDAR point cloud information.
 
+### PX4 SITL — Offboard Guidance Integration
+- Connects ROS2 guidance setpoints to PX4 offboard control through `px4_msgs`.
+- Converts `/guidance/setpoint` from ROS ENU `nav_msgs/Odometry` into PX4 NED `/fmu/in/trajectory_setpoint`.
+- Converts PX4 `/fmu/out/vehicle_odometry` into ROS ENU `/nav/odom`.
+- Uses `position_velocity` offboard mode so PX4 receives both moving position references and velocity feedforward.
+- Keeps the custom controller path available, while PX4 SITL mode uses PX4 internal position/velocity/attitude/rate controllers.
+
+### FAST-LIO2 — LiDAR-Inertial Odometry Integration
+- Adds a PX4/Gazebo `x500_lidar` model with LiDAR and IMU sensor topics.
+- Bridges Gazebo point cloud and IMU topics into ROS2.
+- Converts Gazebo LiDAR point clouds into FAST-LIO2-compatible `/lidar/points_raw`.
+- Converts Gazebo IMU messages into `/lio/imu`.
+- Runs FAST-LIO2 in shadow mode first, then publishes `/lio/odom` into PX4 EKF2 as external vision odometry.
+
+### PX4 EKF2 — External Vision Fusion
+- Converts `/lio/odom` into `/fmu/in/vehicle_visual_odometry`.
+- Applies ENU-to-NED conversion before sending odometry to PX4.
+- Supports selective fusion by publishing position only or position+velocity.
+- Keeps yaw fusion disabled by default to avoid injecting unreliable yaw into PX4 EKF2.
+- GPS-denied stable flight was achieved by fusing **LIO horizontal position** while keeping **barometric height** as the vertical reference.
+
 ### Evaluation and Visualization
 - Logs tracking error, mission completion status, and flight metrics through `tracking_eval_node`.
 - Logs actual D* Lite path keypoints through `planning_path_logger_node`.
+- Logs PX4 reference-tracking RMSE through `px4_tracking_rmse_node`.
 - Provides visualization scripts for XY trajectory, 3D trajectory, obstacle avoidance, axis-wise CTE, and localization error.
 - Generates README-ready result tables and figures for GPS-denied LiDAR-aided navigation experiments.
+- Generates PX4 GPS/LIO comparison plots: XY trajectory, 3D trajectory, and axis-wise tracking error.
 
 ---
 
@@ -155,6 +216,48 @@ Tracking RMSE includes the initial takeoff transient from ground level to the ta
 | LiDAR-aided EKF | Yes | 9.499 | 0.965 | 0.303 | 0.297 | Completed the mission without GPS |
 | LiDAR-aided UKF | Yes | 11.149 | 0.997 | 0.259 | 0.198 | GPS-denied localization close to baseline |
 | LiDAR-init + IMU-only EKF | No | - | 3.525 | 3.445 | 5.377 | Failed due to accumulated IMU drift |
+
+### PX4 EKF2 + FAST-LIO2 External Vision Fusion
+
+This experiment connects FAST-LIO2 odometry to PX4 EKF2 through `/fmu/in/vehicle_visual_odometry`. Unlike the earlier virtual LiDAR pose-correction experiment, this setup runs the PX4 SITL vehicle in Gazebo, generates LiDAR/IMU data from Gazebo sensors, runs FAST-LIO2, and then feeds the resulting LIO odometry into PX4 EKF2 as an external vision source.
+
+#### Experiment Cases
+
+| Case | GPS | LIO External Vision | Height Reference | Description |
+|---|---:|---:|---|---|
+| GPS only | ON | OFF | PX4 default | PX4 EKF2 baseline |
+| GPS + LIO | ON | ON | PX4 default | GPS and FAST-LIO2 external vision fusion |
+| GPS-denied LIO + baro | OFF | ON, horizontal position only | Barometer | GPS-denied fallback configuration |
+
+Full LIO-only fusion was intentionally not used as the final GPS-denied configuration. During testing, blindly fusing full LIO position/velocity caused unstable flight because the vertical and velocity components were not reliable enough during takeoff and aggressive motion. The stable GPS-denied configuration uses LIO horizontal position while keeping barometric height as the vertical reference.
+
+![PX4 LIO XY Trajectory Comparison](images/px4_lio_xy_trajectory_comparison.png)
+
+![PX4 LIO 3D Trajectory Comparison](images/px4_lio_3d_trajectory_comparison.png)
+
+![PX4 LIO Axis-wise Tracking Error](images/px4_lio_axis_error_grid.png)
+
+#### Full Mission RMSE
+
+This table includes the whole flight, including takeoff from ground level. The large initial Z error comes from the reference altitude being near 2 m while the vehicle starts on the ground.
+
+| Case | Duration [s] | RMSE XY [m] | RMSE Z [m] | RMSE 3D [m] | Max 3D [m] | Final 3D [m] |
+|---|---:|---:|---:|---:|---:|---:|
+| GPS only | 41.35 | 0.253 | 0.809 | 0.848 | 1.983 | 0.234 |
+| GPS + LIO | 46.15 | 0.489 | 0.891 | 1.016 | 2.012 | 0.425 |
+| GPS-denied LIO + baro | 48.85 | 0.385 | 0.960 | 1.034 | 2.022 | 0.061 |
+
+#### Stabilized RMSE After 10 Seconds
+
+This table excludes the takeoff transient and is more representative of waypoint tracking after the vehicle has reached the mission altitude.
+
+| Case | Samples | RMSE XY [m] | RMSE Z [m] | RMSE 3D [m] | Max 3D [m] | Final 3D [m] |
+|---|---:|---:|---:|---:|---:|---:|
+| GPS only | 627 | 0.290 | 0.032 | 0.292 | 0.609 | 0.234 |
+| GPS + LIO | 723 | 0.552 | 0.121 | 0.565 | 1.133 | 0.425 |
+| GPS-denied LIO + baro | 777 | 0.432 | 0.338 | 0.549 | 1.976 | 0.061 |
+
+The GPS-only case produced the lowest steady tracking RMSE in this run. GPS + LIO did not outperform GPS-only yet, which indicates that external vision covariance, timestamp alignment, delay compensation, and fusion tuning still need work. The key result is that the GPS-denied LIO + barometer case completed waypoint flight without GPS, validating the fallback architecture for GPS-denied navigation.
 
 ### Key Findings — MPC vs PID Analysis
 
@@ -233,15 +336,15 @@ cd ~/uav_gnc_ws
 colcon build --symlink-install
 source install/setup.bash
 
-# Run the baseline GNC pipeline
-ros2 launch uav_gnc bringup.launch.py
+# Run the custom GNC simulation pipeline
+ros2 launch uav_bringup bringup.launch.py
 
 # Run the integrated v2.0 pipeline
 # Integrated pipeline:
 # 6-DOF simulation + EKF/UKF navigation + virtual LiDAR
 # + occupancy projection + D* Lite planning + guidance + control
 # + tracking/path logging
-ros2 launch uav_gnc bringup_with_path_logger.launch.py
+ros2 launch uav_bringup bringup_with_path_logger.launch.py
 
 # Visualize the ROS2 runtime graph
 # Run this in a separate terminal while the launch file is running
@@ -255,20 +358,112 @@ python3 plot_result.py
 python3 plot_lidar_nav_results.py --base-dir ~/uav_gnc_ws
 ```
 
+### PX4 SITL + FAST-LIO2 Run
+
+The PX4 integration path uses native PX4 v1.16 and Gazebo Harmonic. The custom `x500_lidar` model and `uav_gnc_lio_px4` world are prepared by `tools/run_px4_x500_lidar_lio_world.sh`.
+
+Terminal 1:
+
+```bash
+cd ~/uav_gnc_ws
+./tools/run_px4_x500_lidar_lio_world.sh
+```
+
+Terminal 2:
+
+```bash
+MicroXRCEAgent udp4 -p 8888
+```
+
+Terminal 3:
+
+```bash
+source ~/px4_msgs_ws/install/setup.bash
+source ~/uav_gnc_ws/install/setup.bash
+ros2 launch uav_px4_bridge px4_bringup.launch.py
+```
+
+Terminal 4, FAST-LIO2 shadow validation:
+
+```bash
+source ~/uav_gnc_ws/install/setup.bash
+source ~/uav_gnc_ws/external/fast_lio2_install/setup.bash
+ros2 launch uav_bringup px4_lio_shadow.launch.py start_fast_lio:=true
+```
+
+Terminal 4, PX4 EKF2 external vision fusion:
+
+```bash
+source ~/uav_gnc_ws/install/setup.bash
+source ~/uav_gnc_ws/external/fast_lio2_install/setup.bash
+ros2 launch uav_bringup px4_lio_shadow.launch.py \
+  start_fast_lio:=true \
+  publish_to_px4_ekf:=true
+```
+
+GPS-denied stable configuration:
+
+```bash
+ros2 launch uav_bringup px4_lio_shadow.launch.py \
+  start_fast_lio:=true \
+  publish_to_px4_ekf:=true \
+  publish_lio_velocity:=false
+```
+
+PX4 shell parameters for GPS-denied LIO horizontal position + barometer height:
+
+```bash
+param set EKF2_GPS_CTRL 0
+param set EKF2_EV_CTRL 1
+param set EKF2_EV_NOISE_MD 0
+param set EKF2_HGT_REF 0
+```
+
+Check fusion status:
+
+```bash
+ros2 topic hz /lio/odom
+ros2 topic hz /fmu/in/vehicle_visual_odometry
+ros2 topic echo /fmu/out/estimator_status_flags --once
+```
+
+Expected GPS-denied flags:
+
+```text
+cs_gnss_pos: false
+cs_gnss_vel: false
+cs_ev_pos: true
+cs_ev_hgt: false
+cs_ev_vel: false
+cs_baro_hgt: true
+```
+
+Plot PX4 GPS/LIO comparison results:
+
+```bash
+/home/lyj/venv/myvenv/bin/python3 plot_px4_lio_3d_comparison.py
+```
+
 ### Configuration Files
 
 | File | Key Parameters |
 |------|----------------|
-| `config/simulation.yaml` | UAV mass/inertia, wind disturbance, IMU/GPS noise, simulation timestep |
-| `config/guidance.yaml` | guidance mode, waypoint lists, average speed, planner path usage |
-| `config/control.yaml` | PID/MPC mode, controller gains, MPC horizon, Q/R weights, integral compensation |
-| `config/navigation.yaml` | filter_type, GPS update toggle, LiDAR update toggle, LiDAR init-only mode |
-| `config/planner.yaml` | D* Lite grid size, resolution, start/goal settings, static obstacles, dynamic occupancy usage |
-| `config/virtual_lidar.yaml` | virtual LiDAR range, horizontal/vertical samples, obstacle model |
-| `config/lidar_preprocess.yaml` | point cloud input/output topics, range filtering, z filtering, voxel downsampling |
-| `config/occupancy_projection.yaml` | 2.5D occupancy grid size, resolution, altitude slicing mode |
-| `config/lidar_pose_correction.yaml` | LiDAR-derived pose correction topic, noise model, publish rate, minimum point threshold |
-| `config/planning_path_logger.yaml` | logging topic, CSV output path, append mode |
+| `src/uav_dynamics/config/simulation.yaml` | UAV mass/inertia, actuator mode, wind disturbance, IMU/GPS noise, simulation timestep |
+| `src/uav_guidance/config/guidance.yaml` | guidance mode, waypoint lists, average speed, QP minimum-snap solver, planner path usage |
+| `src/uav_control/config/control.yaml` | PID/MPC mode, controller gains, MPC horizon, Q/R weights, integral compensation |
+| `src/uav_navigation/config/navigation.yaml` | filter_type, GPS update toggle, LiDAR update toggle, LiDAR init-only mode |
+| `src/uav_planning/config/planner.yaml` | D* Lite grid size, resolution, start/goal settings, static obstacles, dynamic occupancy usage |
+| `src/uav_perception/config/virtual_lidar.yaml` | virtual LiDAR range, horizontal/vertical samples, obstacle model |
+| `src/uav_perception/config/lidar_preprocess.yaml` | point cloud input/output topics, range filtering, z filtering, voxel downsampling |
+| `src/uav_perception/config/occupancy_projection.yaml` | 2.5D occupancy grid size, resolution, altitude slicing mode |
+| `src/uav_perception/config/lidar_pose_correction.yaml` | LiDAR-derived pose correction topic, noise model, publish rate, minimum point threshold |
+| `src/uav_evaluation/config/planning_path_logger.yaml` | logging topic, CSV output path, append mode |
+| `src/uav_bringup/config/fast_lio2_uav_gnc.yaml` | FAST-LIO2 topic, LiDAR type, scan line, extrinsic calibration |
+| `src/uav_bringup/config/px4_lio_shadow_bridge.yaml` | Gazebo LiDAR/IMU to ROS2 bridge topics for PX4 LIO tests |
+| `src/uav_bringup/config/gz_lio_vio_bridge.yaml` | Gazebo LiDAR/IMU/stereo/RGB-D bridge topics for LIO/VIO environment tests |
+| `src/uav_bringup/config/vio_interface.yaml` | VIO backend interface contract and expected topics |
+| `src/uav_bringup/worlds/uav_gnc_lio_px4.world.sdf` | PX4/Gazebo LIO-friendly outdoor test world |
+| `src/uav_bringup/models/x500_lidar/model.sdf` | PX4 x500 model extended with LiDAR/IMU sensors |
 
 ---
 
@@ -276,41 +471,24 @@ python3 plot_lidar_nav_results.py --base-dir ~/uav_gnc_ws
 
 ```
 uav_gnc_ws/
-├── src/uav_gnc/
-│   ├── config/                  # YAML configuration files for simulation, control, navigation, planning, and LiDAR modules
-│   ├── include/uav_gnc/
-│   │   ├── controller.h         # PID and Linear MPC controller class definitions
-│   │   ├── sixdof.h             # 6-DOF UAV dynamics data structures and model interface
-│   │   ├── ekf.h                # 15-state Error-State EKF interface
-│   │   ├── ukf.h                # Unscented Kalman Filter interface
-│   │   ├── dstar_lite.h         # D* Lite incremental path planner interface
-│   │   └── trajectory.h         # Minimum-snap trajectory generation interface
-│   ├── launch/
-│   │   ├── bringup.launch.py                   # Main launch file for the core UAV GNC pipeline
-│   │   └── bringup_with_path_logger.launch.py  # Integrated launch file with D* Lite path logging enabled
-│   └── src/
-│       ├── guidance_node.cpp       # Converts planner waypoints into smooth minimum-snap trajectory references
-│       ├── navigation_node.cpp     # EKF/UKF-based state estimation using IMU, GPS, and LiDAR pose correction
-│       ├── control_node.cpp        # Runs PID or MPC control using navigation state and guidance reference
-│       ├── simulation_node.cpp     # 6-DOF UAV simulator with sensor noise and disturbance models
-│       ├── control/controller.cpp  # Core implementation of cascaded PID and Linear MPC
-│       ├── dynamics/sixdof.cpp     # UAV rigid-body dynamics and RK4 integration model
-│       ├── ekf.cpp                 # Error-State EKF prediction and measurement update implementation
-│       ├── ukf.cpp                 # UKF sigma-point propagation and measurement update implementation
-│       ├── trajectory.cpp          # Minimum-snap polynomial trajectory solver
-│       ├── planning/
-│       │   ├── dstar_lite.cpp          # D* Lite path planning algorithm implementation
-│       │   └── path_planner_node.cpp   # ROS2 planner node publishing obstacle-aware paths
-│       ├── perception/
-│       │   ├── virtual_lidar_node.cpp          # Generates virtual 3D LiDAR point clouds from the simulator
-│       │   ├── lidar_preprocess_node.cpp       # Filters and downsamples LiDAR point cloud data
-│       │   ├── occupancy_projection_node.cpp   # Projects 3D LiDAR points into a 2.5D occupancy grid
-│       │   └── lidar_pose_correction_node.cpp  # Publishes LiDAR-derived pose correction for GPS-denied navigation
-│       └── evaluation/
-│           ├── tracking_eval_node.cpp          # Logs tracking error, completion status, and flight metrics to CSV
-│           └── planning_path_logger_node.cpp   # Logs actual D* Lite path keypoints for visualization
-├── plot_result.py               # Legacy result visualization script for baseline GNC tests
-└── plot_lidar_nav_results.py    # LiDAR-aided navigation visualization and summary script
+├── src/
+│   ├── uav_dynamics/       # Custom 6-DOF simulator, actuator allocation, motor/propeller model
+│   ├── uav_navigation/     # Error-State EKF, UKF, localization manager, LIO test sources
+│   ├── uav_guidance/       # Multi-segment minimum-snap trajectory generation and setpoint publisher
+│   ├── uav_control/        # Cascaded PID and condensed linear MPC control
+│   ├── uav_planning/       # D* Lite planner and occupancy-grid path generation
+│   ├── uav_perception/     # Virtual LiDAR, occupancy projection, Gazebo LiDAR/IMU adapters
+│   ├── uav_px4_bridge/     # PX4 odometry conversion, offboard setpoint bridge, LIO external vision bridge
+│   ├── uav_bringup/        # Launch files, PX4/LIO worlds, sensor models, bridge configs
+│   ├── uav_evaluation/     # Tracking RMSE, planning path, and PX4 LIO comparison loggers
+│   ├── uav_visualization/  # RViz path and marker visualization
+│   └── uav_rl/             # PPO residual RL training/evaluation and ROS2 guidance wrapper
+├── tools/
+│   ├── build_fast_lio2_ros2.sh
+│   └── run_px4_x500_lidar_lio_world.sh
+├── plot_result.py
+├── plot_lidar_nav_results.py
+└── plot_px4_lio_3d_comparison.py
 ```
 
 ---
@@ -324,10 +502,12 @@ uav_gnc_ws/
 
 - **Framework:** ROS2 Humble
 - **Language:** C++17 (core), Python3 (analysis/visualization)
+- **SITL:** PX4 v1.16, Gazebo Harmonic
 - **Linear Algebra:** Eigen3
+- **LiDAR Odometry:** FAST-LIO2
 - **Point Cloud Processing:** PCL / PointCloud2
 - **Planning:** D* Lite, 2.5D occupancy grid
-- **State Estimation:** Error-State EKF, UKF, LiDAR-aided pose correction
+- **State Estimation:** Error-State EKF, UKF, PX4 EKF2 external vision fusion, LiDAR-aided pose correction
 - **Visualization:** RViz2, rqt_graph, Matplotlib
 - **Build System:** colcon / CMake
 
@@ -335,10 +515,11 @@ uav_gnc_ws/
 
 ## Future Work
 
-- **PX4 SITL integration:** connect the current ROS2 GNC stack to a Docker-based PX4 SITL environment through offboard control.
-- **Real LiDAR odometry:** replace the current LiDAR-derived pose correction model with ICP/NDT or FAST-LIO/LIO-SAM-style scan matching.
+- **PX4 EKF2 fusion tuning:** tune external vision covariance, delay, timestamp handling, and selective velocity fusion for tighter GPS+LIO performance.
+- **VIO backend integration:** connect stereo/RGB-D Gazebo camera topics to a VIO backend and compare LIO/VIO/GPS fusion.
 - **Full 3D planning:** extend the current 2.5D occupancy grid into a 3D voxel-based planner for altitude-aware obstacle avoidance.
-- **MPC + RL**: reinforcement learning for adaptive Q/R matrix tuning
+- **Custom controller on PX4:** extend offboard experiments from position/velocity setpoints toward velocity, attitude, or rate-level control.
+- **MPC + RL:** reinforcement learning for adaptive guidance/control residuals and Q/R matrix tuning.
 
 ---
 
@@ -357,4 +538,4 @@ uav_gnc_ws/
 
 ---
 
-*Developed as a personal GNC portfolio project. All modules implemented independently.*
+*Developed as a personal GNC portfolio project. The core GNC algorithms are implemented in ROS2, with PX4/Gazebo used as the production-style SITL validation path.*

@@ -28,6 +28,7 @@ obj/
 .agents/
 .codex
 .idea/
+external/
 external/FAST_LIO_ROS2/
 external/livox_ros_driver2/
 external/livox_ros_driver2_stub/
