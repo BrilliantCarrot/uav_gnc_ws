@@ -47,4 +47,4 @@ external/fast_lio2_log/
 *.zip
 *.jpg
 __pycache__/
-AGENT_NOTES.md
+AGENTS.md
